@@ -1,9 +1,5 @@
-using ModelingToolkit, DifferentialEquations, Plots, GaussianRandomFields, Interpolations, Random, Flux, IterTools, GraphNeuralNetworks, Statistics, LinearAlgebra, Graphs, SparseArrays, Juno, ForwardDiff
-
-
-include("MyDeepONets.jl")
-using .MyDeepONets
-
+using ModelingToolkit, DifferentialEquations, Plots, GaussianRandomFields, Interpolations, Random, Flux, IterTools, GraphNeuralNetworks, Statistics, LinearAlgebra, Graphs, SparseArrays, Juno, ForwardDiff, NeuralOperators
+import Base.@kwdef
 
 yspan = [0, 1]
 v0 = 0 # initial value of solution at y=0
@@ -110,122 +106,61 @@ for i in [1,2,3,batch_size ÷ 2,batch_size-3, batch_size-2,batch_size-1,batch_si
 end
 
 
-## Prepare graphs
-cutoff = 0.1
-g_matrix = zeros(n_sensors,n_sensors)
-for (idx, sensor) in enumerate(x_locs)
-    g_matrix[idx, :] .= (xi-xf).^2 ./ (sensor .- x_locs).^2
-end
-g_matrix[diagind(g_matrix)] .= 0
-g_matrix /= maximum(g_matrix)
-g_matrix[g_matrix .< cutoff] .= 0
-g_matrix[diagind(g_matrix)] .= 1
-graph = GNNGraph(sparse(g_matrix), graph_type=:sparse)
-batch_graphs = Flux.batch([GNNGraph(graph, graph_type=:coo) for _ in 1:batch_size])
-
-
 
 ## Define layers
 
-use_gnn = false
-if use_gnn
-    # Ret god. Men langsom
-    graph_conv_features = 5
-    graph_conv_features_out = 5
-    branch = GNNChain(
-        GCNConv(1 => graph_conv_features, activation_function; use_edge_weight=true, add_self_loops=false),
-        GCNConv(graph_conv_features => graph_conv_features_out, activation_function; use_edge_weight=true, add_self_loops=false),
-        x->reshape(x,n_sensors*graph_conv_features_out,:),
-        Dense(n_sensors*graph_conv_features_out, latent_size)
-    )
 
-    # graph_conv_features = 5
-    # branch = GNNChain(
-    #     GCNConv(1 => graph_conv_features, activation_function; use_edge_weight=true, add_self_loops=false),
-    #     GCNConv(graph_conv_features => latent_size, activation_function; use_edge_weight=true, add_self_loops=false),
-    #     GlobalPool(mean),
-    #     x->reshape(x,latent_size,:),
-    # )
+b = [0.0]
 
-    # branch = GNNChain(
-    #     GCNConv(1 => nn_width, activation_function; use_edge_weight=true, add_self_loops=false),
-    #     GlobalPool(mean),
-    #     Dense(nn_width, latent_size)
-    # )
+branch = Chain(
+    Dense(n_sensors, nn_width, activation_function),
+    Dense(nn_width, latent_size),
 
-
-    # Ikke så god
-    # graph_conv_features = 5
-    # branch = GNNChain(
-    #     GCNConv(1 => graph_conv_features, activation_function; use_edge_weight=true, add_self_loops=false),
-    #     GCNConv(graph_conv_features => nn_width, activation_function; use_edge_weight=true, add_self_loops=false),
-    #     GlobalPool(mean),
-    #     Dense(nn_width, nn_width),
-    #     Dense(nn_width, latent_size)
-    # )
-
-else
-
-    branch = Chain(
-        Dense(n_sensors, nn_width, activation_function),
-        Dense(nn_width, latent_size)
-    )
-
-end
+)
 
 trunk = Chain(
     Dense(1, nn_width, activation_function),
     Dense(nn_width, nn_width, activation_function),
-    Dense(nn_width, latent_size, activation_function)
+    Dense(nn_width, latent_size, activation_function),
+
 )
-# b0 = [0.0]
 
-
+# branch
+x->cat(x, ones(1,size(x,2)), dims=1)
+# trunk
+x->cat(x, fill(b[1],(1,size(x,2))), dims=1)
 
 
 ## Define model
-# struct NeuralOperator{branch_type}
-#     branch::branch_type
-#     trunk::Chain
-#     b0::Vector{Float64}
-# end
-#
-#
-# function (m::NeuralOperator{T})(y,u_vals) where T<:GNNChain
-#
-#     this_batch_size = size(u_vals,2)
-#     if this_batch_size == batch_size
-#         return sum(m.branch(batch_graphs, reshape(u_vals,1,:)) .* m.trunk(y), dims=1) .+ m.b0[1]
-#     else
-#         this_batch_graphs = Flux.batch([GNNGraph(graph, graph_type=:coo) for _ in 1:this_batch_size])
-#         return sum(m.branch(this_batch_graphs, reshape(u_vals,1,:)) .* m.trunk(y), dims=1) .+ m.b0[1]
-#     end
-#
-# end
-#
-#
-# function (m::NeuralOperator{T})(y,u_vals) where T<:Chain
-#     return sum(m.branch(u_vals) .* m.trunk(y), dims=1) .+ m.b0[1]
-# end
-#
-#
-#
-#
-#
-# Flux.@functor NeuralOperator
 
-model = MyDeepONet(trunk=trunk, branch=branch, const_bias=true)
+# Option 1, hardcode bias into branch and trunks, make bias trainable
+Flux.trainable(m::DeepONet) = (m.branch_net, m.trunk_net, b)
+model = DeepONet(branch, trunk)
 
-# model = NeuralOperator{typeof(branch)}(branch, trunk, b0)
+# Option 2, create struct to automatically append bias layers
+@kwdef mutable struct DeepONet_with_bias
+    branch::Any
+    trunk::Any
+    bias_behaviour::Symbol = :none
 
-# loss((y, u_vals), v_y_true) = Flux.mse(model(y,u_vals), v_y_true)
+    
+end
 
+
+#=
+arguments:
+branch, trunk(, :none is implied)
+branch, trunk, :constant
+branch, trunk, :variable
+=#
+
+## Define loss
 loss((y, u_vals), v_y_true) = Flux.mse(model(y,u_vals), v_y_true)
 params = Flux.params(model)
 
 loss(first(train_loader)...)
 ## Training loop
-opt = Adam(0.001)
+opt = ADAM(0.001)
 n_epochs = 30
 
 loss_train = zeros(n_epochs)
@@ -248,8 +183,8 @@ u = get_u(plot_seed)
 prob = ODEProblem(f, v0, yspan, u)
 sol = solve(prob, RK4(), saveat=x_locs)
 u_vals_plot = reshape(u(x_locs),:,1)
-deepo_solution = model(reshape(x_locs,1,:), u_vals_plot)[:]
-deepo_deriv = ForwardDiff.derivative.(y->model([y], u_vals_plot)[], x_locs)
+deepo_solution = neural_op(reshape(x_locs,1,:), u_vals_plot)[:]
+deepo_deriv = ForwardDiff.derivative.(y->neural_op([y], u_vals_plot)[], x_locs)
 
 p1=plot(x_locs, x->u(x), label="Input function", reuse = false)
 plot!(x_locs, sol.u, label="Numerical solution")
@@ -261,8 +196,8 @@ display(p1)
 
 unseen_u_vals = sin.(x_locs)
 unseen_v_vals = -cos.(y_locs)
-unseen_deepo_vals = reshape(model(reshape(y_locs,1,:), unseen_u_vals),:)
-unseen_deepo_deriv = ForwardDiff.derivative.(y->model([y], unseen_u_vals)[], x_locs)
+unseen_deepo_vals = reshape(neural_op(reshape(y_locs,1,:), unseen_u_vals),:)
+unseen_deepo_deriv = ForwardDiff.derivative.(y->neural_op([y], unseen_u_vals)[], x_locs)
 p2 = plot(x_locs, unseen_u_vals, label="Input: sin", reuse = false)
 plot!(y_locs, unseen_v_vals, label="Analytical output: -cos")
 plot!(y_locs, unseen_deepo_vals, label="DeepONet output")
@@ -272,8 +207,8 @@ display(p2)
 
 unseen_u_vals = cos.(x_locs)
 unseen_v_vals = sin.(y_locs)
-unseen_deepo_vals = reshape(model(reshape(y_locs,1,:), unseen_u_vals),:)
-unseen_deepo_deriv = ForwardDiff.derivative.(y->model([y], unseen_u_vals)[], x_locs)
+unseen_deepo_vals = reshape(neural_op(reshape(y_locs,1,:), unseen_u_vals),:)
+unseen_deepo_deriv = ForwardDiff.derivative.(y->neural_op([y], unseen_u_vals)[], x_locs)
 p2 = plot(x_locs, unseen_u_vals, label="Input: cos", reuse = false)
 plot!(y_locs, unseen_v_vals, label="Analytical output: sin")
 plot!(y_locs, unseen_deepo_vals, label="DeepONet output")
@@ -288,8 +223,8 @@ expanded_y_locs = -0.05:0.001:2
 unseen_v_vals = unseen_v.(expanded_y_locs)
 unseen_u_vals = ForwardDiff.derivative.(unseen_v, x_locs)
 unseen_u_vals_plot = ForwardDiff.derivative.(unseen_v, expanded_y_locs)
-unseen_deepo_vals = reshape(model(reshape(expanded_y_locs,1,:), unseen_u_vals),:)
-unseen_deepo_deriv = ForwardDiff.derivative.(y->model([y], unseen_u_vals)[], expanded_y_locs)
+unseen_deepo_vals = reshape(neural_op(reshape(expanded_y_locs,1,:), unseen_u_vals),:)
+unseen_deepo_deriv = ForwardDiff.derivative.(y->neural_op([y], unseen_u_vals)[], expanded_y_locs)
 p2 = plot(expanded_y_locs, unseen_u_vals_plot, label="Input: 2y - 1/(y + 0.1)² + 2 exp(2y) sin(10 y) + 10 exp(2y) cos(10y) + 1", reuse = false, ylims=(-100,60), legend=:bottomleft)
 plot!(expanded_y_locs, unseen_v_vals, label="Analytical output: sin(10y) exp(2y) + y + y² + 1/(y+0.1) - 10")
 plot!(expanded_y_locs, unseen_deepo_vals, label="DeepONet output")
@@ -301,7 +236,7 @@ display(p2)
 # println("DeepONet solution: $(Flux.mse(sol.u,deepo_solution))")
 # for i in 1:10
 #     global deepo_solution
-#     deepo_solution -= model(reshape(x_locs,1,:), u(x_locs, plot_seed)-ForwardDiff.derivative.(t->model([t], deepo_solution)[], x_locs))[:]
+#     deepo_solution -= neural_op(reshape(x_locs,1,:), u(x_locs, plot_seed)-ForwardDiff.derivative.(t->neural_op([t], deepo_solution)[], x_locs))[:]
 #     println("DeepONet iterative solution $i: $(Flux.mse(sol.u,deepo_solution))")
 # end
 
