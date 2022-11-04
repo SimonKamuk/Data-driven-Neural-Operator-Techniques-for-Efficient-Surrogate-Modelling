@@ -26,7 +26,7 @@ n_grf_generate_points = 1000
 n_u_trajectories = 100
 n_u_trajectories_test = 100
 n_u_trajectories_validation = 100
-batch_size = 50
+batch_size = 100
 n_y_eval = 1000
 xi = yspan[1]
 xf = yspan[2]
@@ -133,15 +133,15 @@ loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs)
 
 
 # To be used only after final model is selected
-# function get_loss_test()
-#     loss_test = 0
-#     for d in loaders.test
-#         loss_test+=loss(d...)/length(loaders.test)
-#     end
-#     return loss_test
-# end
-# loss_test = get_loss_test()
-# println(@sprintf "Test loss: %.3e" loss_test)
+function get_loss_test()
+    loss_test = 0
+    for d in loaders.test
+        loss_test+=loss(d...)/length(loaders.test)
+    end
+    return loss_test
+end
+loss_test = get_loss_test()
+println(@sprintf "Test loss: %.3e" loss_test)
 
 
 
