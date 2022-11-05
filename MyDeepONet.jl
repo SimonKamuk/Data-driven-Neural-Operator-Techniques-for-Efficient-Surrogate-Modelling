@@ -49,17 +49,6 @@ function generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectorie
     v_vals = zeros((total_trajectories, n_y_eval))
     seeds = zeros(Int, (total_trajectories, n_y_eval))
 
-    #=
-    shuffled_seeds = Flux.shuffleobs(MersenneTwister(abs(rand(Int64))),1:total_trajectories)
-    seeds_progress = ProgressBar(1:total_trajectories)
-    set_description(seeds_progress, "Generating data:")
-    for idx in seeds_progress
-        seed = shuffled_seeds[idx]
-        u_vals[:, idx, :] .= u_func(x_locs, seed)
-        v_vals[idx, :] = v_func(y_locs[seed,:], seed)
-        seeds[idx, :] .= seed
-    end
-    =#
     seeds_progress = ProgressBar(Flux.shuffleobs(MersenneTwister(abs(rand(Int64))),1:total_trajectories))
     set_description(seeds_progress, "Generating data:")
     for (idx,seed) in enumerate(seeds_progress)

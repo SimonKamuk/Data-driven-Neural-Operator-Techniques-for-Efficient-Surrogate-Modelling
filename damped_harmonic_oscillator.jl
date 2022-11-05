@@ -8,10 +8,9 @@ using .MyDeepONet
 yspan = [0, 3]
 v0 = [1,1] # initial value of solution at y=0
 # Define problem to be solved: dv/dy = u(y)
-ζ = 1
-k = 1
-m = 0.1
-function f(v, u, y)
+
+function f(v, p, y)
+    u,ζ,k,m = p
     dv = [v[2], -2*ζ*sqrt(k/m)*v[2] .- k/m*v[1] .+ u(y)/m]
     return dv
 end
@@ -50,9 +49,12 @@ end
 
 function get_u_grf(seed)
     # Define input function
+    rng = MersenneTwister(seed)
+    ζ,k,m = clamp.(randn(rng, 3) .* [1,1,0.1] .+ [0,0,0.1], 0, Inf)
+    ζ,k,m = 1,1,0.1
     interp = interpolate(
         (grf_generate_point_locs,),
-        GaussianRandomFields.sample(grf,xi=randn(MersenneTwister(seed), randdim(grf))),
+        GaussianRandomFields.sample(grf,xi=randn(rng, randdim(grf))),
         Gridded(Interpolations.Linear()))
     return interp
 end
@@ -61,17 +63,23 @@ end
 function get_u_sinusoidal(seed)
     # Define input function
     rng = MersenneTwister(seed)
+    ζ,k,m = clamp.(randn(rng, 3) .* [1,1,0.1] .+ [0,0,0.1], 0, Inf)
+    ζ,k,m = 1,1,0.1
     F0=rand(rng, Uniform(0,6))
     ω=rand(rng, Uniform(0,10))
     return x->F0*sin.(ω*x)
 end
 
 
-ω₀= sqrt(k/m)
+
 function v_func_analytical_sinusoidal(y,seed)
     rng = MersenneTwister(seed)
+    ζ,k,m = clamp.(randn(rng, 3) .* [1,1,0.1] .+ [0,0,0.1], 0, Inf)
+    ζ,k,m = 1,1,0.1
     F0=rand(rng, Uniform(0,6))
     ω=rand(rng, Uniform(0,10))
+
+    ω₀= sqrt(k/m)
 
     φ = atan(2*ω*ω₀*ζ/(ω^2-ω₀^2))
     φ += (φ>0)*π
@@ -92,7 +100,17 @@ get_u = get_u_grf
 function v_func(y, seed)
     # Solve problem with numerical ode solver (4th order Runge-Kutta) and
     # evaluate solution at points y
-    prob = ODEProblem(f, v0, yspan, get_u(seed))
+
+    u=get_u(seed)
+    rng = MersenneTwister(seed)
+    ζ,k,m = clamp.(randn(rng, 3) .* [1,1,0.1] .+ [0,0,0.1], 0, Inf)
+    ζ,k,m = 1,1,0.1
+    p = (u,ζ,k,m)
+    # ζ = p[2] # 1
+    # k = p[3] # 1
+    # m = p[4] # 0.1
+
+    prob = ODEProblem(f, v0, yspan, p)
     v_values = solve(prob, Tsit5(), saveat=y).u
     # Return only the solution, not its derivative
     return [v[1] for v in v_values]
@@ -128,9 +146,7 @@ opt = NAdam()
 
 n_epochs = 100
 
-# loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs, patience=Inf,threshold_factor = 0.85, lr_factor = 0.5, cooldown=3)
 loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs)
-
 
 # To be used only after final model is selected
 function get_loss_test()
