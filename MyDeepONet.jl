@@ -15,53 +15,91 @@ end
 
 
 function (m::DeepONet)(y,u_vals)
-    if m.trunk_var_bias
-        b = m.branch(u_vals)
-        t = m.trunk(y)
-        return sum(b .* t[begin:end-1], dims=1) .+ m.bias[] .+ t[end]
+    if m.branch isa Array
+        b = prod(cat(
+                [m.branch[i](u_vals[i]) for i in 1:length(m.branch)]...,
+                dims=3
+            ),dims=3)[:,:,1]
+
     else
         b = m.branch(u_vals)
-        t = m.trunk(y)
+        b = reshape(b,size(b,1),:)
+    end
+    t = m.trunk(y)
+    t = reshape(t,size(t,1),:)
+
+    if m.trunk_var_bias
+        return sum(b .* t[begin:end-1], dims=1) .+ m.bias[] .+ t[end]
+    else
         return sum(b .* t, dims=1) .+ m.bias[]
     end
 end
 
 function Flux.trainable(m::DeepONet)
-    if m.const_bias
-        return (m.branch, m.trunk, m.bias)
+    if m.branch isa Array
+        if m.const_bias
+            return (m.branch..., m.trunk, m.bias)
+        else
+            return (m.branch..., m.trunk)
+        end
     else
-        return (m.branch, m.trunk)
+        if m.const_bias
+            return (m.branch, m.trunk, m.bias)
+        else
+            return (m.branch, m.trunk)
+        end
     end
 end
 
 
-function generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size; equidistant_y=false)
+function generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size; equidistant_y=false, y_locs=nothing)
     total_trajectories = n_u_trajectories+n_u_trajectories_test+n_u_trajectories_validation
 
-    if equidistant_y
-        y_locs = repeat(range(start=yspan[begin], stop=yspan[end], length=n_y_eval)', total_trajectories)
+    if y_locs == nothing
+        if equidistant_y
+            y_locs = repeat(range(start=yspan[begin], stop=yspan[end], length=n_y_eval), 1, total_trajectories)
+        else
+            y_locs = rand(Uniform(yspan[begin], yspan[end]), n_y_eval, total_trajectories)
+            sort!(y_locs, dims=1)
+        end
     else
-        y_locs = rand(Uniform(yspan[begin], yspan[end]), total_trajectories, n_y_eval)
-        sort!(y_locs, dims=2)
+        if length(size(y_locs)) == 1
+            y_locs = repeat(y_locs, 1, total_trajectories)
+        end
     end
 
-    u_vals = zeros((n_sensors, total_trajectories, n_y_eval))
-    v_vals = zeros((total_trajectories, n_y_eval))
-    seeds = zeros(Int, (total_trajectories, n_y_eval))
+    if u_func isa Array
+        u_vals = [zeros((n_sensors[i], n_y_eval, total_trajectories)) for i in 1:length(u_func)]
+    else
+        u_vals = zeros((n_sensors, n_y_eval, total_trajectories))
+    end
+    v_vals = zeros((n_y_eval, total_trajectories))
+    seeds = zeros(Int, (n_y_eval, total_trajectories))
 
     seeds_progress = ProgressBar(Flux.shuffleobs(MersenneTwister(abs(rand(Int64))),1:total_trajectories))
     set_description(seeds_progress, "Generating data:")
+
     for (idx,seed) in enumerate(seeds_progress)
-        u_vals[:, idx, :] .= u_func(x_locs, seed)
-        v_vals[idx, :] = v_func(y_locs[idx,:], seed)
-        seeds[idx, :] .= seed
+        if u_func isa Array
+            for u_idx in 1:length(u_func)
+                u_vals[u_idx][:, :, idx] .= u_func[u_idx](x_locs[u_idx], seed)
+            end
+        else
+            u_vals[:, :, idx] .= u_func(x_locs, seed)
+        end
+        v_vals[:,idx] = v_func(y_locs[:, idx], seed)
+        seeds[:, idx] .= seed
     end
     print("Initial data generation completed. Finishing up and testing correct ordering now.")
 
-    u_vals = reshape(permutedims(u_vals,[1,3,2]), n_sensors, :)
-    v_vals = reshape(permutedims(v_vals,[2,1]), 1, :)
-    y_locs = reshape(permutedims(y_locs,[2,1]), 1, :)
-    seeds = reshape(permutedims(seeds,[2,1]), :)
+    if u_func isa Array
+        u_vals = tuple((reshape(u_vals[i], n_sensors[i], :) for i in 1:length(u_vals))...)
+    else
+        u_vals = reshape(u_vals, n_sensors, :)
+    end
+    v_vals = reshape(v_vals, 1, :)
+    y_locs = reshape(y_locs, 1, :)
+    seeds = reshape(seeds, :)
 
     # Split into training, validation, and test sets
     data = ( (y_locs, u_vals), v_vals )
@@ -80,7 +118,7 @@ function generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectorie
     train_seeds_loader = loader(train_seeds,copy(train_rng)) #Flux.DataLoader(train_seeds, batchsize=batch_size, partial=false)
     validation_seeds_loader = loader(validation_seeds,copy(validation_rng)) #Flux.DataLoader(validation_seeds, batchsize=batch_size, partial=false)
     test_seeds_loader = loader(test_seeds,copy(test_rng)) #Flux.DataLoader(test_seeds, batchsize=batch_size, partial=false)
-
+    
 
     # Make sure data is structured as expected
     @assert isempty(intersect(Set(test_seeds), Set(train_seeds), Set(validation_seeds_loader)))
@@ -93,7 +131,14 @@ function generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectorie
         y_locs_test, u_vals_test = first_input
         for i in [1,2,3,batch_size ÷ 2,batch_size-3, batch_size-2,batch_size-1,batch_size]
             @assert v_func(y_locs_test[:,i], first_seeds[i])[] == first_output[i]
-            @assert u_func(x_locs, first_seeds[i]) == u_vals_test[:,i]
+
+            if u_func isa Array
+                for u_idx in 1:length(u_func)
+                    @assert u_func[u_idx](x_locs[u_idx], first_seeds[i]) == u_vals_test[u_idx][:, i]
+                end
+            else
+                @assert u_func(x_locs, first_seeds[i]) == u_vals_test[:,i]
+            end
         end
     end
 

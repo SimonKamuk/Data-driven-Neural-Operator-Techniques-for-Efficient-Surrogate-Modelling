@@ -22,9 +22,9 @@ nn_width = 50
 latent_size = 50
 activation_function = relu
 n_grf_generate_points = 1000
-n_u_trajectories = 100
+n_u_trajectories = 200
 n_u_trajectories_test = 1000
-n_u_trajectories_validation = 100
+n_u_trajectories_validation = 200
 batch_size = 100
 n_y_eval = 1000
 xi = yspan[1]
@@ -47,13 +47,25 @@ if !(@isdefined grf) | recompute_data
     grf = GaussianRandomField(cov, Spectral(), grf_generate_point_locs)
 end
 
+function get_mass(seed)
+    rng = MersenneTwister(seed)
+    m = 0.0
+    while m>=0.25 || m<=0.05
+        m = randn(rng) * 0.05 + 0.15
+    end
+    # while m<=0
+    #     m = randn(rng) * 0.05 + 0.15
+    # end
+
+    # m=0.15
+    return m, rng
+end
 
 
 function get_u_grf(seed)
     # Define input function
-    rng = MersenneTwister(seed)
+    m,rng = get_mass(seed)
 
-    m=0.1
     ζ,k = 1,1
 
     interp = interpolate(
@@ -66,9 +78,7 @@ end
 
 function get_u_sinusoidal(seed)
     # Define input function
-    rng = MersenneTwister(seed)
-
-    m=0.1
+    m,rng = get_mass(seed)
     ζ,k = 1,1
     F0=rand(rng, Uniform(0,6))
     ω=rand(rng, Uniform(0,10))
@@ -77,10 +87,11 @@ end
 
 
 
-function v_func_analytical_sinusoidal(y,seed)
-    rng = MersenneTwister(seed)
-
-    m=0.1
+function v_func_analytical_sinusoidal(y,seed;m_in=nothing)
+    m,rng = get_mass(seed)
+    if m_in != nothing
+        m=m_in
+    end
     ζ,k = 1,1
     F0=rand(rng, Uniform(0,6))
     ω=rand(rng, Uniform(0,10))
@@ -108,10 +119,9 @@ function v_func(y, seed)
     # evaluate solution at points y
 
     u=get_u(seed)
-    rng = MersenneTwister(seed)
-
+    m,rng = get_mass(seed)
     ζ,k = 1,1
-    m=0.1
+
     p = (u,ζ,k,m)
 
     prob = ODEProblem(f, v0, yspan, p)
@@ -120,21 +130,31 @@ function v_func(y, seed)
     return [v[1] for v in v_values]
 end
 
-u_func(x_locs, seed) = get_u(seed)(x_locs)
-
+u_func = [(x_locs, seed) -> get_u(seed)(x_locs), (x_locs, seed) -> [get_mass(seed)[1]]]
+x_locs_tuple = [x_locs, []]
+n_sensors_tuple = [n_sensors, 1]
 
 ## Generate data
 if !(@isdefined loaders) | recompute_data
-    loaders = generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size, equidistant_y=false)
+    loaders = generate_data(x_locs_tuple, yspan, u_func, v_func, n_sensors_tuple, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size, equidistant_y=false)
 end
 
 ## Define layers
 
-branch = Chain(
-    Dense(n_sensors, latent_size, init=flux_ini)
-)
+branch = [Chain(Dense(n_sensors, nn_width, activation_function, init=flux_ini),
+                Dense(nn_width, latent_size, init=flux_ini)),
+          Chain(Dense(1, nn_width, activation_function, init=flux_ini),
+                Dense(nn_width, nn_width, activation_function, init=flux_ini),
+                Dense(nn_width, latent_size, init=flux_ini))]
+
+# branch = [Chain(Dense(n_sensors, latent_size, init=flux_ini)),
+#           Chain(x->ones(latent_size,size(x)[2:end]...))]
+
+
+
 trunk = Chain(
     Dense(1, nn_width, activation_function, init=flux_ini),
+    Dense(nn_width, nn_width, activation_function, init=flux_ini),
     Dense(nn_width, latent_size, activation_function, init=flux_ini)
 )
 
@@ -143,15 +163,13 @@ model = DeepONet(trunk=trunk, branch=branch, const_bias=true)
 loss((y, u_vals), v_y_true) = Flux.mse(model(y,u_vals), v_y_true)
 params = Flux.params(model)
 
-
 loss(first(loaders.train)...)
-
 
 ## Training loop
 opt = NAdam()
 # opt = Adam()
 
-n_epochs = 100
+n_epochs = 200
 
 loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs)
 
@@ -172,33 +190,78 @@ println(@sprintf "Test loss: %.3e" loss_test)
 
 
 ## Plotting
-plot_seed = n_u_trajectories + n_u_trajectories_validation + n_u_trajectories_test÷2
-u_vals_plot = u_func(x_locs, plot_seed)
+plot_seed = n_u_trajectories + n_u_trajectories_validation + n_u_trajectories_test÷4
+u_vals_plot = [u_func[i](x_locs_tuple[i], plot_seed) for i in 1:length(u_func)]
 v_vals_plot = v_func(x_locs, plot_seed)
 deepo_solution = model(reshape(x_locs,1,:), u_vals_plot)[:]
-title = @sprintf "Example DeepONet input/output. MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
-p=plot(x_locs, u_vals_plot, label="Input function from test set", reuse = false, title=title)
+title = @sprintf "Example input/output. MSE %.2e. Mass %.3f" Flux.mse(deepo_solution, v_vals_plot) u_vals_plot[2][]
+p=plot(x_locs, u_vals_plot[1], label="Input function from test set", reuse = false, title=title)
 plot!(x_locs, v_vals_plot, label="Numerical solution")
 plot!(x_locs, deepo_solution, label="DeepONet output")
 xlabel!("y")
 ylabel!("Function value")
-savefig(p, "plots/harmonic_oscillator_test_function.pdf")
+savefig(p, "plots/harmonic_oscillator_test_function_var_mass.pdf")
 display(p)
 
 
 
 
+
+m = 0.1
 y_vals_plot = yspan[1]:0.001:yspan[2]
 u_vals_plot = get_u_sinusoidal(plot_seed)(x_locs)
-v_vals_plot = v_func_analytical_sinusoidal(y_vals_plot, plot_seed)
-deepo_solution = model(reshape(y_vals_plot,1,:), u_vals_plot)[:]
-title = @sprintf "Harmonic oscillator. MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
+v_vals_plot = v_func_analytical_sinusoidal(y_vals_plot, plot_seed;m_in=m)
+deepo_solution = model(reshape(y_vals_plot,1,:), [u_vals_plot, [m]])[:]
+title = @sprintf "Harmonic oscillator. MSE %.2e. Mass %.2f" Flux.mse(deepo_solution, v_vals_plot) m
 p=plot(x_locs, u_vals_plot, label="Input function: F₀sin(ωy)", reuse = false, title=title)
 plot!(y_vals_plot, v_vals_plot, label="Analytical solution")
 plot!(y_vals_plot, deepo_solution, label="DeepONet output")
 xlabel!("y")
 ylabel!("Function value")
-savefig(p, "plots/harmonic_oscillator_analytical.pdf")
+savefig(p, "plots/harmonic_oscillator_analytical_var_mass_$m.pdf")
+display(p)
+
+
+m = 0.15
+y_vals_plot = yspan[1]:0.001:yspan[2]
+u_vals_plot = get_u_sinusoidal(plot_seed)(x_locs)
+v_vals_plot = v_func_analytical_sinusoidal(y_vals_plot, plot_seed;m_in=m)
+deepo_solution = model(reshape(y_vals_plot,1,:), [u_vals_plot, [m]])[:]
+title = @sprintf "Harmonic oscillator. MSE %.2e. Mass %.2f" Flux.mse(deepo_solution, v_vals_plot) m
+p=plot(x_locs, u_vals_plot, label="Input function: F₀sin(ωy)", reuse = false, title=title)
+plot!(y_vals_plot, v_vals_plot, label="Analytical solution")
+plot!(y_vals_plot, deepo_solution, label="DeepONet output")
+xlabel!("y")
+ylabel!("Function value")
+savefig(p, "plots/harmonic_oscillator_analytical_var_mass_$m.pdf")
+display(p)
+
+m = 0.2
+y_vals_plot = yspan[1]:0.001:yspan[2]
+u_vals_plot = get_u_sinusoidal(plot_seed)(x_locs)
+v_vals_plot = v_func_analytical_sinusoidal(y_vals_plot, plot_seed;m_in=m)
+deepo_solution = model(reshape(y_vals_plot,1,:), [u_vals_plot, [m]])[:]
+title = @sprintf "Harmonic oscillator. MSE %.2e. Mass %.2f" Flux.mse(deepo_solution, v_vals_plot) m
+p=plot(x_locs, u_vals_plot, label="Input function: F₀sin(ωy)", reuse = false, title=title)
+plot!(y_vals_plot, v_vals_plot, label="Analytical solution")
+plot!(y_vals_plot, deepo_solution, label="DeepONet output")
+xlabel!("y")
+ylabel!("Function value")
+savefig(p, "plots/harmonic_oscillator_analytical_var_mass_$m.pdf")
+display(p)
+
+m = 0.25
+y_vals_plot = yspan[1]:0.001:yspan[2]
+u_vals_plot = get_u_sinusoidal(plot_seed)(x_locs)
+v_vals_plot = v_func_analytical_sinusoidal(y_vals_plot, plot_seed;m_in=m)
+deepo_solution = model(reshape(y_vals_plot,1,:), [u_vals_plot, [m]])[:]
+title = @sprintf "Harmonic oscillator. MSE %.2e. Mass %.2f" Flux.mse(deepo_solution, v_vals_plot) m
+p=plot(x_locs, u_vals_plot, label="Input function: F₀sin(ωy)", reuse = false, title=title)
+plot!(y_vals_plot, v_vals_plot, label="Analytical solution")
+plot!(y_vals_plot, deepo_solution, label="DeepONet output")
+xlabel!("y")
+ylabel!("Function value")
+savefig(p, "plots/harmonic_oscillator_analytical_var_mass_$m.pdf")
 display(p)
 
 
@@ -209,5 +272,5 @@ p=plot(loss_train, label="Train", legend=:topright, reuse = false, markershape =
 plot!(loss_validation, label="Validation", markershape = :circle)
 xlabel!("Epochs")
 ylabel!("Loss (MSE)")
-savefig(p, "plots/harmonic_oscillator_training.pdf")
+savefig(p, "plots/harmonic_oscillator_training_var_mass.pdf")
 display(p)
