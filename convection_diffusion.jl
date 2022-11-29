@@ -5,7 +5,6 @@ using .MyDeepONet
 
 tspan = [0, 5]
 yspan = [0, 1]
-n_dims = 1
 n_sensors = 100
 nn_width = 70
 latent_size = 70
@@ -13,7 +12,9 @@ activation_function = relu
 n_u_trajectories = 1000
 n_u_trajectories_test = 1000
 n_u_trajectories_validation = 1000
+n_y_eval = 100
 batch_size = 50
+n_epochs = 100
 n_spatial_finite_diff = n_sensors * 100
 n_fft_diff = 1000
 xi = yspan[1]
@@ -22,8 +23,6 @@ recompute_data = true
 Random.seed!(0)
 flux_ini = Flux.glorot_uniform(MersenneTwister(rand(Int64)))
 
-n_y_locs = 1000
-y_locs = range(start=xi, stop=xf, length=n_y_locs+1)[begin:end-1]
 
 
 D=200
@@ -148,8 +147,8 @@ u_func(x_locs, seed) = get_u(seed)(x_locs)
 
 ## Generate data
 if !(@isdefined loaders) | recompute_data
-    loaders = generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_sensors, batch_size, equidistant_y=false)
-    # loaders = generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_sensors, batch_size, y_locs=x_locs)
+    loaders = generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size, equidistant_y=false)
+    # loaders = generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size, y_locs=x_locs)
 
     # code_lowered(get_u)[]
 end
@@ -185,8 +184,6 @@ loss(first(loaders.train)...)
 opt = NAdam()
 # opt = Adam()
 
-n_epochs = 100
-
 loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs)
 
 # To be used only after final model is selected
@@ -207,13 +204,14 @@ end
 
 ## Plotting
 plot_seed = n_u_trajectories + n_u_trajectories_validation + n_u_trajectories_test÷2
-u_vals_plot = u_func(x_locs, plot_seed)
-v_vals_plot = v_func(x_locs, plot_seed)
-deepo_solution = model(reshape(x_locs,1,:), u_vals_plot)[:]
+x_locs_plot = cat(x_locs,xf,dims=1)
+u_vals_plot = u_func(x_locs_plot, plot_seed)
+v_vals_plot = v_func(x_locs_plot, plot_seed)
+deepo_solution = model(reshape(x_locs_plot,1,:), u_vals_plot[begin:end-1])[:]
 title = @sprintf "Example DeepONet input/output. MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
-p=plot(x_locs, u_vals_plot, label="Input function from test set", reuse = false, title=title)
-plot!(x_locs, v_vals_plot, label="Numerical solution")
-plot!(x_locs, deepo_solution, label="DeepONet output")
+p=plot(x_locs_plot, u_vals_plot, label="Input function from test set", reuse = false, title=title)
+plot!(x_locs_plot, v_vals_plot, label="Numerical solution")
+plot!(x_locs_plot, deepo_solution, label="DeepONet output")
 xlabel!("y")
 ylabel!("Function value")
 savefig(p, "plots/convection_diffusion_test_function.pdf")
