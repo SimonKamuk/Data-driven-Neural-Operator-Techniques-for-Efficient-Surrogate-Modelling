@@ -3,8 +3,8 @@ using ModelingToolkit, DifferentialEquations, Plots, GaussianRandomFields, Inter
 include("MyDeepONet.jl")
 using .MyDeepONet
 
-tspan = [0, 5]
-yspan = [0, 1]
+tspan = [0 5]
+yspan = [0 1]
 n_sensors = 100
 nn_width = 70
 latent_size = 70
@@ -109,7 +109,7 @@ function v_func_FD(y, seed; manual_u = nothing)
         cat(v_values,v_values[begin],dims=1),
         Gridded(Interpolations.Linear()))
 
-    return inter(y)
+    return inter(y[:])
 end
 
 function v_func_fft(y, seed; manual_u = nothing)
@@ -136,7 +136,8 @@ function v_func_fft(y, seed; manual_u = nothing)
         cat(v_values,v_values[begin],dims=1),
         Gridded(Interpolations.Linear()))
 
-    return inter(y)
+    # Use linear indexing because y is already assumed to be 1d (removes length 1 dimensions)
+    return inter(y[:])
 end
 
 
@@ -177,7 +178,7 @@ loss((y, u_vals), v_y_true) = Flux.mse(model(y,u_vals), v_y_true)
 params = Flux.params(model)
 
 
-loss(first(loaders.train)...)
+loss(first(loaders.train)[1]...)
 
 
 ## Training loop
@@ -189,7 +190,7 @@ loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs)
 # To be used only after final model is selected
 function get_loss_test()
     loss_test = 0
-    for d in loaders.test
+    for (d,s) in loaders.test
         loss_test+=loss(d...)/length(loaders.test)
     end
     return loss_test

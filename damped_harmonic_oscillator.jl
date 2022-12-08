@@ -5,7 +5,7 @@ include("MyDeepONet.jl")
 using .MyDeepONet
 
 
-yspan = [0, 3]
+yspan = [0 3]
 v0 = [1,1] # initial value of solution at y=0
 # Define problem to be solved: dv/dy = u(y)
 
@@ -144,7 +144,7 @@ loss((y, u_vals), v_y_true) = Flux.mse(model(y,u_vals), v_y_true)
 params = Flux.params(model)
 
 
-loss(first(loaders.train)...)
+loss(first(loaders.train)[1]...)
 
 
 ## Training loop
@@ -158,7 +158,7 @@ loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs)
 # To be used only after final model is selected
 function get_loss_test()
     loss_test = 0
-    for d in loaders.test
+    for (d,s) in loaders.test
         loss_test+=loss(d...)/length(loaders.test)
     end
     return loss_test

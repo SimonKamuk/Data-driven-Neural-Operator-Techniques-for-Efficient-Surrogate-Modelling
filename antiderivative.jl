@@ -5,7 +5,7 @@ include("MyDeepONet.jl")
 using .MyDeepONet
 
 
-yspan = [0, 1]
+yspan = [0 1]
 v0 = 0 # initial value of solution at y=0
 # Define problem to be solved: dv/dy = u(y)
 function f(v, u, y)
@@ -99,7 +99,7 @@ loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs)
 # To be used only after final model is selected
 function get_loss_test()
     loss_test = 0
-    for d in loaders.test
+    for (d,s) in loaders.test
         loss_test+=loss(d...)/length(loaders.test)
     end
     return loss_test
