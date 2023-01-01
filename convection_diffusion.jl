@@ -6,20 +6,24 @@ using .MyDeepONet
 tspan = [0 5]
 yspan = [0 1]
 n_sensors = 100
-nn_width = 70
-latent_size = 70
+nn_width = 50
+latent_size = 80
+branch_depth = 6
+trunk_depth = 6
 activation_function = relu
 n_u_trajectories = 1000
 n_u_trajectories_test = 1000
 n_u_trajectories_validation = 1000
-n_y_eval = 100
+n_y_eval = 200
 batch_size = 50
-n_epochs = 100
+n_epochs = 200
 n_spatial_finite_diff = n_sensors * 100
 n_fft_diff = 1000
 xi = yspan[1]
 xf = yspan[2]
-recompute_data = true
+recompute_data = false
+const_bias = false
+trunk_var_bias = true
 Random.seed!(0)
 flux_ini = Flux.glorot_uniform(MersenneTwister(rand(Int64)))
 
@@ -158,22 +162,21 @@ end
 
 ## Define layers
 
+@assert branch_depth >= 3
 branch = Chain(
     Dense(n_sensors, nn_width, activation_function, init=flux_ini),
-    Dense(nn_width, nn_width, activation_function, init=flux_ini),
-    Dense(nn_width, nn_width, activation_function, init=flux_ini),
+    [Dense(nn_width, nn_width, activation_function, init=flux_ini) for _ in 1:branch_depth-3]...,
     Dense(nn_width, latent_size, init=flux_ini)
 )
+@assert trunk_depth >= 3
 trunk = Chain(
     Dense(1, nn_width, activation_function, init=flux_ini),
-    Dense(nn_width, nn_width, activation_function, init=flux_ini),
-    Dense(nn_width, nn_width, activation_function, init=flux_ini),
-    Dense(nn_width, nn_width, activation_function, init=flux_ini),
-    Dense(nn_width, latent_size, activation_function, init=flux_ini)
+    [Dense(nn_width, nn_width, activation_function, init=flux_ini) for _ in 1:trunk_depth-3]...,
+    Dense(nn_width, latent_size+trunk_var_bias, activation_function, init=flux_ini)
 )
 
 # Define model
-model = DeepONet(trunk=trunk, branch=branch, const_bias=true)
+model = DeepONet(trunk=trunk, branch=branch, const_bias=const_bias, trunk_var_bias=trunk_var_bias)
 loss((y, u_vals), v_y_true) = Flux.mse(model(y,u_vals), v_y_true)
 params = Flux.params(model)
 
@@ -185,7 +188,7 @@ loss(first(loaders.train)[1]...)
 opt = NAdam()
 # opt = Adam()
 
-loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs)
+loss_train, loss_validation = train!(model, loaders, params, loss, opt, n_epochs)
 
 # To be used only after final model is selected
 function get_loss_test()
@@ -210,7 +213,7 @@ u_vals_plot = u_func(x_locs_plot, plot_seed)
 v_vals_plot = v_func(x_locs_plot, plot_seed)
 deepo_solution = model(reshape(x_locs_plot,1,:), u_vals_plot[begin:end-1])[:]
 title = @sprintf "Example DeepONet input/output. MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
-p=plot(x_locs_plot, u_vals_plot, label="Input function from test set", reuse = false, title=title)
+p=plot(x_locs_plot, u_vals_plot, label="Input function from test set", reuse = false, title=title, legend_position=:bottomright)
 plot!(x_locs_plot, v_vals_plot, label="Numerical solution")
 plot!(x_locs_plot, deepo_solution, label="DeepONet output")
 xlabel!("y")

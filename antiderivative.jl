@@ -93,7 +93,7 @@ opt = NAdam()
 n_epochs = 100
 
 # loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs, patience=Inf,threshold_factor = 0.85, lr_factor = 0.5, cooldown=3)
-loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs)
+loss_train, loss_validation = train!(model, loaders, params, loss, opt, n_epochs)
 
 
 # To be used only after final model is selected

@@ -153,7 +153,7 @@ opt = NAdam()
 
 n_epochs = 100
 
-loss_train, loss_validation = train!(loaders, params, loss, opt, n_epochs)
+loss_train, loss_validation = train!(model, loaders, params, loss, opt, n_epochs)
 
 # To be used only after final model is selected
 function get_loss_test()

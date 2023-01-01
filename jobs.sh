@@ -6,7 +6,7 @@
 ##BSUB -gpu "num=1:mode=exclusive_process"
 
 ##Navn på job. Hvis man vil lave mange jobs kan man skrive my_job_name[1-100] så får man 100 jobs.
-#BSUB -J deeponet_param_search[1-324]
+#BSUB -J deeponet_param_search[1-729]
 ##Output log fil. Folderen skal eksistere før jobbet submittes. Job nummer indsættes automatisk ved %J i filnavnet.
 #BSUB -o output/deeponet_param_search_%J_%I.out
 ##Antal cpu kerner
@@ -14,7 +14,7 @@
 ##Om kernerne må være på forskellige computere
 #BSUB -R "span[hosts=1]"
 ##Ram pr kerne
-#BSUB -R "rusage[mem=4GB]"
+#BSUB -R "rusage[mem=8GB]"
 ##Hvor lang tid må den køre hh:mm
 #BSUB -W 10:00
 ##Modtag email på studiemail når jobbet starter
