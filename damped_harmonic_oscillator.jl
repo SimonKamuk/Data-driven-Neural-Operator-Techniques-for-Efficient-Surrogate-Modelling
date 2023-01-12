@@ -115,9 +115,10 @@ function v_func(y, seed)
     p = (u,ζ,k,m)
 
     prob = ODEProblem(f, v0, yspan, p)
+    sort_idx = sortperm(y[:])
     v_values = solve(prob, Tsit5(), saveat=y).u
     # Return only the solution, not its derivative
-    return [v[1] for v in v_values]
+    return [v[1] for v in v_values[invperm(sort_idx)]]
 end
 
 u_func(x_locs, seed) = get_u(seed)(x_locs)
@@ -139,12 +140,12 @@ trunk = Chain(
 )
 
 # Define model
-model = DeepONet(trunk=trunk, branch=branch, const_bias=true)
-loss((y, u_vals), v_y_true) = Flux.mse(model(y,u_vals), v_y_true)
+model = DeepONet(trunk=trunk, branch=branch, const_bias_trainable=true)
+loss(((y, u_vals), v_y_true),seed) = Flux.mse(model(y,u_vals), v_y_true)
 params = Flux.params(model)
 
 
-loss(first(loaders.train)[1]...)
+loss(first(loaders.train)...)
 
 
 ## Training loop
@@ -159,7 +160,7 @@ loss_train, loss_validation = train!(model, loaders, params, loss, opt, n_epochs
 function get_loss_test()
     loss_test = 0
     for (d,s) in loaders.test
-        loss_test+=loss(d...)/length(loaders.test)
+        loss_test+=loss(d,s)/length(loaders.test)
     end
     return loss_test
 end

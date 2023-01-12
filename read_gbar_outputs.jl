@@ -1,38 +1,58 @@
 using Flux, Plots, StatsPlots
 
-input_filename = "output/deeponet_param_search_15136559_"
+input_filename = "output/deeponet_param_search_15142534_"
 ext = ".out"
 min_loss = (Inf,-1)
 
+# 15136559
+# params = [
+# (n_sensors,width,latent_width,activation_function,depth,physics_weight)
+# for n_sensors in [50,100,150]
+# for width in [50,75,100]
+# for latent_width in [50,75,100]
+# for activation_function in ["Softplus","Tanh","Sigmoid"]
+# for depth in [3,4,5]
+# for physics_weight in [0.1,0.5,1.0]
+# ]
+# param_names = [
+#     "Number of sensors",
+#     "Network width",
+#     "Latent space width",
+#     "Activation function",
+#     "Network depth",
+#     "Physics weight",
+# ]
 
+# 15139534
+# params = [
+# (initial, internal, boundary)
+# for initial in [0.0, 0.1, 0.2, 0.3]
+# for internal in [0.0, 0.1, 0.2, 0.3]
+# for boundary in [0.0, 0.1, 0.2, 0.3]
+# ]
+# param_names = [
+#     "IC loss weight",
+#     "Interior loss weight",
+#     "BC loss weight",
+# ]
+
+# 15142534
 params = [
-(n_sensors,width,latent_width,activation_function,depth,physics_weight)
-for n_sensors in [50,100,150]
-for width in [50,75,100]
-for latent_width in [50,75,100]
-for activation_function in [softplus,tanh,sigmoid]
-for depth in [3,4,5]
-for physics_weight in [0.1,0.5,1.0]
+(bw, tw, bd, td)
+for bw in [35, 50, 65]
+for tw in [35, 50, 65]
+for bd in [3,4,5,6]
+for td in [3,4,5,6]
+]
+param_names = [
+    "Branch width",
+    "Trunk width",
+    "Branch depth",
+    "Trunk depth",
 ]
 
 n_params = length(params[1])
-# (n_sensors,nn_width,latent_size,activation_function,branch_depth,trunk_depth,physics_weight) = params[jobindex]
 loss_values = [Dict() for _ in 1:n_params]
-    # Dict(50=>[],100=>[],150=>[]),
-    # Dict(50=>[],75=>[],100=>[]),
-    # Dict(50=>[],75=>[],100=>[]),
-    # Dict(softplus=>[],tanh=>[],sigmoid=>[]),
-    # Dict(3=>[],4=>[],5=>[]),
-    # Dict(0.1=>[],0.5=>[],1.0=>[]),
-
-param_names = [
-    "Number of sensors",
-    "Network width",
-    "Latent space width",
-    "Activation function",
-    "Network depth",
-    "Physics weight",
-]
 
 flush(stdout)
 

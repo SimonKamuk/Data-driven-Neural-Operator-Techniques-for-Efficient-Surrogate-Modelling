@@ -27,6 +27,7 @@ n_u_trajectories_test = 1000
 n_u_trajectories_validation = 200
 batch_size = 100
 n_y_eval = 1000
+
 xi = yspan[1]
 xf = yspan[2]
 recompute_data = true
@@ -127,12 +128,14 @@ function v_func(y, seed)
     prob = ODEProblem(f, v0, yspan, p)
     v_values = solve(prob, Tsit5(), saveat=y).u
     # Return only the solution, not its derivative
-    return [v[1] for v in v_values]
+    sort_idx = sortperm(y[:])
+    return [v[1] for v in v_values[invperm(sort_idx)]]
 end
 
-u_func = [(x_locs, seed) -> get_u(seed)(x_locs), (x_locs, seed) -> [get_mass(seed)[1]]]
-x_locs_tuple = [x_locs, []]
-n_sensors_tuple = [n_sensors, 1]
+u_func = (x_locs_tuple, seed) -> (get_u(seed)(x_locs_tuple[1]), [get_mass(seed)[1]])
+
+x_locs_tuple = (x_locs, [0])
+n_sensors_tuple = (n_sensors, 1)
 
 ## Generate data
 if !(@isdefined loaders) | recompute_data
@@ -159,11 +162,11 @@ trunk = Chain(
 )
 
 # Define model
-model = DeepONet(trunk=trunk, branch=branch, const_bias=true)
-loss((y, u_vals), v_y_true) = Flux.mse(model(y,u_vals), v_y_true)
+model = DeepONet(trunk=trunk, branch=branch, const_bias_trainable=true)
+loss(((y, u_vals), v_y_true),s) = Flux.mse(model(y,u_vals), v_y_true)
 params = Flux.params(model)
 
-loss(first(loaders.train)[1]...)
+loss(first(loaders.train)...)
 
 ## Training loop
 opt = NAdam()
@@ -177,7 +180,7 @@ loss_train, loss_validation = train!(model, loaders, params, loss, opt, n_epochs
 function get_loss_test()
     loss_test = 0
     for (d,s) in loaders.test
-        loss_test+=loss(d...)/length(loaders.test)
+        loss_test+=loss(d,s)/length(loaders.test)
     end
     return loss_test
 end

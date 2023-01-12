@@ -35,7 +35,6 @@ x_locs = range(start=xi, stop=xf, length=n_sensors) # Sensor locations (input fu
 y_locs = range(start=yspan[1], stop=yspan[2], length=n_y_eval) # Output function evaluation points
 
 
-
 ## Define functions
 if !(@isdefined grf) | recompute_data
     println("Generating gaussian random field")
@@ -57,9 +56,10 @@ end
 function v_func(y, seed)
     # Solve problem with numerical ode solver (4th order Runge-Kutta) and
     # evaluate solution at points y
+    sort_idx = sortperm(y[:])
     prob = ODEProblem(f, v0, yspan, get_u(seed))
     v_values = solve(prob, Tsit5(), saveat=y).u
-    return v_values
+    return v_values[invperm(sort_idx)]
 end
 
 u_func(x_locs, seed) = get_u(seed)(x_locs)
@@ -81,8 +81,8 @@ trunk = Chain(
 )
 
 # Define model
-model = DeepONet(trunk=trunk, branch=branch, const_bias=true)
-loss((y, u_vals), v_y_true) = Flux.mse(model(y,u_vals), v_y_true)
+model = DeepONet(trunk=trunk, branch=branch, const_bias_trainable=true)
+loss(((y, u_vals), v_y_true),s) = Flux.mse(model(y,u_vals), v_y_true)
 params = Flux.params(model)
 
 
@@ -100,7 +100,7 @@ loss_train, loss_validation = train!(model, loaders, params, loss, opt, n_epochs
 function get_loss_test()
     loss_test = 0
     for (d,s) in loaders.test
-        loss_test+=loss(d...)/length(loaders.test)
+        loss_test+=loss(d,s)/length(loaders.test)
     end
     return loss_test
 end

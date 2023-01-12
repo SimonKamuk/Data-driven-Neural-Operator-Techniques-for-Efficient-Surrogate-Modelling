@@ -5,10 +5,10 @@ using .MyDeepONet
 
 
 # Data setup
-xi = -0.5
-xf = 0.5
-ti = -0.5
-tf = 0.5
+xi = 0
+xf = 1
+ti = 0
+tf = 1
 yspan = [xi xf;ti tf]
 D=0.05#10000  # Diffusivity
 vel=1  # Velocity
@@ -25,25 +25,26 @@ frequency_decay = 0.25  # Larger number means faster decay, meaning fewer high f
 Random.seed!(0)
 flux_ini = Flux.glorot_uniform(MersenneTwister(rand(Int64)))
 recompute_data = false
-save_on_recompute = true
+save_on_recompute = false
 training_var_time = true
 const_bias_trainable = false
 trunk_var_bias = true
 equidistant_y = false
 
+
 # Model setup
 if length(ARGS) == 0
-    n_sensors = 100
-    branch_width = 75
-    trunk_width = 75
-    latent_size = 100
+    n_sensors = 50
+    branch_width = 35
+    trunk_width = 65
+    branch_depth = 3
+    trunk_depth = 5
+    latent_size = 75
     activation_function = softplus
-    branch_depth = 4
-    trunk_depth = 4
     physics_weight_initial = 0.0
     physics_weight_boundary = 0.0
-    physics_weight_interior = 1.0
-    data_weight = 0.0
+    physics_weight_interior = 0.0
+    data_weight = 1.0
     regularisation_weight = 0.0
     PI_use_AD = false  # AD not currently working
     do_plots = true
@@ -85,15 +86,15 @@ else
 
 
     (branch_width,trunk_width,branch_depth,trunk_depth) = [
-    (initial, internal, boundary)
-    for bw in []
-    for tw in []
-    for bd in []
-    for td in []
+    (bw, tw, bd, td)
+    for bw in [35, 50, 65]
+    for tw in [35, 50, 65]
+    for bd in [3,4,5,6]
+    for td in [3,4,5,6]
     ][jobindex]
-    physics_weight_initial =
-    physics_weight_boundary =
-    physics_weight_interior =
+    physics_weight_initial = 0.0
+    physics_weight_boundary = 0.0
+    physics_weight_interior = 0.0
     n_sensors = 50
     latent_size = 75
     activation_function = softplus
@@ -306,11 +307,9 @@ if training_var_time
     ϵ = Float64(eps(float_type_func==f32 ? Float32 : Float64)^(1/3))
     first_deriv_compiled_tape = nothing
     second_deriv_compiled_tape = nothing
-    function loss((yt, u_vals), v_y_true, p=nothing)
+    function loss(((yt, u_vals), v_y_true),s, p=nothing)
         if p!=nothing && length(p)==2
             p = [p;[0.0]]
-        else
-            p = p
         end
         global first_deriv_compiled_tape, second_deriv_compiled_tape
         # yt = cat(yt[1,:],ones(size(yt,2)),dims=2)'
@@ -349,7 +348,7 @@ if training_var_time
         # MÅSKE SKAL MODEL IKKE VÆRE GLOBAL?
 
         sensor_idx = rand(MersenneTwister(0),1:n_sensors,batch_size)  # Randomly select which sensors are used for initial value loss
-        random_sensors = [u_vals[sensor_idx[i],i] for i in 1:batch_size]'
+        random_sensors = [u_vals[1][sensor_idx[i],i] for i in 1:batch_size]'
 
         b = evaluate_branch(model,u_vals,p)
 
@@ -540,15 +539,15 @@ if training_var_time
         return 2*(data_loss_squared * data_weight + physics_loss_initial * physics_weight_initial + physics_loss_boundary * physics_weight_boundary + physics_loss_interior * physics_weight_interior) / batch_size + regularisation_loss * regularisation_weight
     end
 else
-    loss((y, u_vals), v_y_true) = Flux.mse(model(y,u_vals), v_y_true)
+    loss(((y, u_vals), v_y_true),s) = Flux.mse(model(y,u_vals), v_y_true)
 end
 
 if PI_use_AD
-    @time loss(first(loaders.train)[1]..., params)
+    @time loss(first(loaders.train)..., params)
     first_deriv_compiled_tape = nothing
     second_deriv_compiled_tape = nothing
 else
-    @time loss(first(loaders.train)[1]...)
+    @time loss(first(loaders.train)...)
 end
 flush(stdout)
 
@@ -566,14 +565,14 @@ end
 
 loss_train = fill(NaN,n_epochs)
 loss_validation = fill(NaN,n_epochs)
-verbose = 0
+verbose = 2
 train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose)
 
 # To be used only after final model is selected
 function compute_total_loss(loader)
     loss_test = 0
     for (d,s) in loader
-        loss_test+=loss(d...)/length(loader)
+        loss_test+=loss(d,s)/length(loader)
     end
     return loss_test
 end
@@ -598,13 +597,13 @@ if do_plots
         v_vals_plot = reshape(v_func(yt, plot_seed), length(t_plot), length(x_locs_full))
         deepo_solution = reshape(model(yt, u_vals_plot[begin:end-1])[:], length(t_plot), length(x_locs_full))
         # title = @sprintf "Example DeepONet input/output. MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
-        p1=heatmap(x_locs_full, t_plot, deepo_solution, reuse = false, title="DeepONet\nprediction", clim=extrema([v_vals_plot;deepo_solution]),xticks=[ti,(ti+tf)/2,tf])
+        p1=heatmap(x_locs_full, t_plot, deepo_solution, reuse = false, title="DeepONet\nprediction", clim=extrema([v_vals_plot;deepo_solution]),xticks=[xi,(xi+xf)/2,xf])
         xlabel!("y")
         ylabel!("t")
         title=@sprintf "Error\nMSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
-        p2=heatmap(x_locs_full, t_plot, v_vals_plot-deepo_solution, reuse = false, title=title, yticks=false,xticks=[ti,(ti+tf)/2,tf])
+        p2=heatmap(x_locs_full, t_plot, v_vals_plot-deepo_solution, reuse = false, title=title, yticks=false,xticks=[xi,(xi+xf)/2,xf])
         xlabel!("y")
-        p3=heatmap(x_locs_full, t_plot, v_vals_plot, reuse = false, title="Numerical\nsolution", clim=extrema([v_vals_plot;deepo_solution]), yticks=false,xticks=[ti,(ti+tf)/2,tf])
+        p3=heatmap(x_locs_full, t_plot, v_vals_plot, reuse = false, title="Numerical\nsolution", clim=extrema([v_vals_plot;deepo_solution]), yticks=false,xticks=[xi,(xi+xf)/2,xf])
         xlabel!("y")
         p = plot(p1, p2, p3, reuse = false, layout = (1,3))
         savefig(p, "plots/convection_diffusion_example_$(file_time_label)_time.pdf")
@@ -628,14 +627,14 @@ if do_plots
     if do_plots && D==0
         FD_v_vals_plot = reshape(v_func_FD(yt, plot_seed), length(t_plot), length(x_locs_full))
         analytical_solution = hcat([u_func(x_locs_full .- vel*t, plot_seed) for t in t_plot]...)'
-        p1=heatmap(x_locs_full, t_plot, analytical_solution, reuse = false, title="Analytical", clim=extrema([analytical_solution;FD_v_vals_plot;v_vals_plot]),xticks=[ti,(ti+tf)/2,tf])
+        p1=heatmap(x_locs_full, t_plot, analytical_solution, reuse = false, title="Analytical", clim=extrema([analytical_solution;FD_v_vals_plot;v_vals_plot]),xticks=[xi,(xi+xf)/2,xf])
         xlabel!("y")
         ylabel!("t")
         tit = @sprintf "FD numerical\nMSE: %.2e" mean((analytical_solution-FD_v_vals_plot).^2)
-        p2=heatmap(x_locs_full, t_plot, FD_v_vals_plot, reuse = false, title=tit, clim=extrema([analytical_solution;FD_v_vals_plot;v_vals_plot]),xticks=[ti,(ti+tf)/2,tf])
+        p2=heatmap(x_locs_full, t_plot, FD_v_vals_plot, reuse = false, title=tit, clim=extrema([analytical_solution;FD_v_vals_plot;v_vals_plot]),xticks=[xi,(xi+xf)/2,xf])
         xlabel!("y")
         tit = @sprintf "fft numerical\nMSE: %.2e" mean((analytical_solution-v_vals_plot).^2)
-        p3=heatmap(x_locs_full, t_plot, v_vals_plot, reuse = false, title=tit, clim=extrema([analytical_solution;FD_v_vals_plot;v_vals_plot]),xticks=[ti,(ti+tf)/2,tf])
+        p3=heatmap(x_locs_full, t_plot, v_vals_plot, reuse = false, title=tit, clim=extrema([analytical_solution;FD_v_vals_plot;v_vals_plot]),xticks=[xi,(xi+xf)/2,xf])
         xlabel!("y")
         p = plot(p1, p2, p3, reuse = false, layout = (1,3))
         savefig(p, "plots/convection_example_$(file_time_label)_time.pdf")

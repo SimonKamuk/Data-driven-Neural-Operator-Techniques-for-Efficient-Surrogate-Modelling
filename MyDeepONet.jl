@@ -18,6 +18,13 @@ struct DeepONet{B,T,B_re,T_re,branch_float_type,trunk_float_type,bias_float_type
         branch_p,branch_re = Flux.destructure(branch)
         trunk_p,trunk_re = Flux.destructure(trunk)
 
+        if !(branch isa Array)
+            branch = [branch]
+        end
+        if !(trunk isa Array)
+            trunk = [trunk]
+        end
+
         return new{typeof(branch), typeof(trunk),typeof(branch_re),typeof(trunk_re),eltype(branch_p),eltype(trunk_p),eltype(bias)}(
             branch,
             trunk,
@@ -36,11 +43,14 @@ end
 
 
 function evaluate_branch(m::DeepONet,u_vals,p=nothing)
-    if m.branch isa Array
+    # if m.branch isa Array
         if p==nothing
             b_funs = m.branch
         else
             b_funs = m.branch_re(p[1])
+        end
+        if !(u_vals isa Tuple)
+            u_vals = (u_vals,)
         end
         b = prod(cat(
                 map(1:length(m.branch)) do i
@@ -49,24 +59,34 @@ function evaluate_branch(m::DeepONet,u_vals,p=nothing)
                 dims=3
             ),dims=3)[:,:,1]
 
-    else
-        if p==nothing
-            b = m.branch(u_vals)
-        else
-            b = m.branch_re(p[1])(u_vals)
-        end
-        b = reshape(b,size(b,1),:)
-    end
+    # else
+    #     if p==nothing
+    #         b = m.branch(u_vals)
+    #     else
+    #         b = m.branch_re(p[1])(u_vals)
+    #     end
+    #     b = reshape(b,size(b,1),:)
+    # end
     return b
 end
 function evaluate_trunk(m::DeepONet,y,p=nothing)
-    if p==nothing
-        t = m.trunk(y)
-    else
-        t = m.trunk_re(p[2])(y)
-    end
-    t = reshape(t,size(t,1),:)
-    return t
+    # if m.trunk isa Array
+        if p==nothing
+            t_funs = m.trunk
+        else
+            t_funs = m.trunk_re(p[2])
+        end
+        return cat([reshape(t_fun(y),:,size(y,2)) for t_fun in t_funs]..., dims=3)
+
+    # else
+        # if p==nothing
+        #     t = m.trunk(y)
+        # else
+        #     t = m.trunk_re(p[2])(y)
+        # end
+        # return reshape(t,size(t,1),size(y,2),:)
+    # end
+
 end
 function combine_latent(m::DeepONet,t,b,p=nothing)
     if p==nothing
@@ -75,9 +95,9 @@ function combine_latent(m::DeepONet,t,b,p=nothing)
         bias = p[3][]
     end
     if m.trunk_var_bias
-        return sum(b .* t[begin:end-1,:], dims=1) .+ bias .+ t[end]
+        return (sum(b .* t[begin:end-1,:,:], dims=1)[1,:,:] .+ bias .+ t[end,:,:])'
     else
-        return sum(b .* t, dims=1) .+ bias
+        return (sum(b .* t, dims=1)[1,:,:] .+ bias)'
     end
 end
 function restructure_update(m::DeepONet)
@@ -150,14 +170,15 @@ function generate_y_locs(yspan, n_y_eval, total_trajectories, equidistant_y)
     else
         y_locs = permutedims(cat(
                                  [
-                                     sort(rand(Uniform(yspan[i,begin], yspan[i,end]), n_y_eval_total, total_trajectories), dims=1)
+                                     rand(Uniform(yspan[i,begin], yspan[i,end]), n_y_eval_total, total_trajectories)
+                                     # sort(rand(Uniform(yspan[i,begin], yspan[i,end]), n_y_eval_total, total_trajectories), dims=1)
                                      for i in 1:ydim
                                  ]...,
                                  dims=3),[3,1,2])
     end
 end
 
-function generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size; equidistant_y=false, y_locs=nothing)
+function generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size; equidistant_y=false, y_locs=nothing, vdim=1)
     total_trajectories = n_u_trajectories+n_u_trajectories_test+n_u_trajectories_validation
 
     # yspan matrix
@@ -179,42 +200,76 @@ function generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectorie
         end
     end
 
-    if u_func isa Array
-        u_vals = [zeros((n_sensors[i], n_y_eval_total, total_trajectories)) for i in 1:length(u_func)]
+
+    # if !(n_sensors isa Array)
+    #     n_sensors = [n_sensors]
+    # end
+    if !(x_locs isa Tuple)
+        if length(size(x_locs)) == 1
+            n_sensors = (size(x_locs,1),)
+        else
+            n_sensors = (size(x_locs,2),)
+        end
+        udim = 1
     else
-        u_vals = zeros((n_sensors, n_y_eval_total, total_trajectories))
+        n_sensors = map(x_locs) do x
+            if length(size(x)) == 1
+                return size(x,1)
+            else
+                return size(x,2)
+            end
+        end
+
+        udim = length(x_locs)
     end
-    v_vals = zeros((n_y_eval_total, total_trajectories))
+
+    # if u_func isa Array
+        u_vals = tuple((zeros((n_sensors[i], n_y_eval_total, total_trajectories)) for i in 1:udim)...)
+    # else
+    #     u_vals = zeros((n_sensors, n_y_eval_total, total_trajectories))
+    # end
+
+    v_vals = zeros((vdim, n_y_eval_total, total_trajectories))
     seeds = zeros(Int, (n_y_eval_total, total_trajectories))
 
     seeds_progress = ProgressBar(Flux.shuffleobs(MersenneTwister(abs(rand(Int64))),1:total_trajectories))
     set_description(seeds_progress, "Generating data:")
 
     for (idx,seed) in enumerate(seeds_progress)
-        if u_func isa Array
-            for u_idx in 1:length(u_func)
-                u_vals[u_idx][:, :, idx] .= u_func[u_idx](x_locs[u_idx], seed)
+        # if u_func isa Array
+            u_vals_this_seed = u_func(x_locs, seed)
+            if !(u_vals_this_seed isa Tuple)
+                u_vals_this_seed = (u_vals_this_seed,)
             end
-        else
-            u_vals[:, :, idx] .= u_func(x_locs, seed)
-        end
-        v_vals[:,idx] = v_func(y_locs[:, :, idx], seed)
+
+            for u_idx in 1:udim
+                u_vals[u_idx][:, :, idx] .= u_vals_this_seed[u_idx]
+            end
+
+        # else
+        #     u_vals[:, :, idx] .= u_func(x_locs, seed)
+        # end
+        v_vals[:, :,idx] = v_func(y_locs[:, :, idx], seed)
+        # println(y_locs[:, :, idx], seed)
+        # println(v_vals[:, :,idx])
+        # println("\n")
         seeds[:, idx] .= seed
     end
     print("Initial data generation completed. Finishing up and testing correct ordering now.")
 
-    if u_func isa Array
-        u_vals = tuple((reshape(u_vals[i], n_sensors[i], :) for i in 1:length(u_vals))...)
-    else
-        u_vals = reshape(u_vals, n_sensors, :)
-    end
-    v_vals = reshape(v_vals, 1, :)
+    # if u_func isa Array
+    u_vals = tuple((reshape(u_vals[i], n_sensors[i], :) for i in 1:udim)...)
+    # else
+    #     u_vals = reshape(u_vals, n_sensors, :)
+    # end
+    v_vals = reshape(v_vals, vdim, :)
     y_locs = reshape(y_locs, ydim, :)
     seeds = reshape(seeds, :)
 
     # Split into training, validation, and test sets
     data = ( (y_locs, u_vals), v_vals )
 
+    # SHUFFLE HERE???
     train_data, validation_data, test_data = Flux.splitobs(data, at=(n_u_trajectories*n_y_eval_total, n_u_trajectories_validation*n_y_eval_total))
     train_seeds, validation_seeds, test_seeds = Flux.splitobs(seeds, at=(n_u_trajectories*n_y_eval_total, n_u_trajectories_validation*n_y_eval_total))
 
@@ -233,17 +288,33 @@ function generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectorie
 
         ((y_locs_test, u_vals_test),first_output),first_seeds = first(loader)
         for i in [1,2,3,batch_size ÷ 2,batch_size-3, batch_size-2,batch_size-1,batch_size]
-            @assert abs(v_func(y_locs_test[:,i], first_seeds[i])[] - first_output[i]) <= 1e-5
+            # println(size(y_locs_test))
+            # println(size(first_seeds))
+            # println(size(first_output))
+            #
+            # println(y_locs_test[:,i])
+            # println(first_seeds[i])
+            # println(first_output[:,i])
+            # println(v_func(y_locs_test[:,i], first_seeds[i]))
+            #
+            @assert all(abs.(v_func(y_locs_test[:,i], first_seeds[i]) .- first_output[:,i]) .<= 1e-5)
             # @assert v_func(y_locs_test[:,i], first_seeds[i])[] == first_output[i]
 
-            if u_func isa Array
-                for u_idx in 1:length(u_func)
-                    @assert all(abs.(u_func[u_idx](x_locs[u_idx], first_seeds[i]) - u_vals_test[u_idx][:,i]) .<= 1e-5)
-                    # @assert u_func[u_idx](x_locs[u_idx], first_seeds[i]) == Float32.(u_vals_test[u_idx][:, i])
+            # if u_func isa Array
+                u_vals_this_seed = u_func(x_locs, first_seeds[i])
+                if !(u_vals_this_seed isa Tuple)
+                    u_vals_this_seed = (u_vals_this_seed,)
                 end
-            else
-                @assert all(abs.(u_func(x_locs, first_seeds[i]) - u_vals_test[:,i]) .<= 1e-5)
-            end
+                for u_idx in 1:udim
+                    @assert all(abs.(u_vals_this_seed[u_idx] - u_vals_test[u_idx][:,i]) .<= 1e-5)
+
+                end
+
+                    # @assert u_func[u_idx](x_locs[u_idx], first_seeds[i]) == Float32.(u_vals_test[u_idx][:, i])
+
+            # else
+            #     @assert all(abs.(u_func(x_locs, first_seeds[i]) - u_vals_test[:,i]) .<= 1e-5)
+            # end
         end
     end
 
@@ -261,13 +332,22 @@ end
 
 
 
-function train!(model, data_loaders, params, loss, opt, n_epochs, loss_train=nothing, loss_validation=nothing, verbose=2)
+function train!(model, data_loaders, params, loss_fun, opt, n_epochs, loss_train=nothing, loss_validation=nothing, verbose=2, loss_fun_val = nothing, aux_params=nothing)
     # training_loss is declared local so it will be available for logging outside the gradient calculation.
     local training_loss
 
     if params isa Vector
         opt_tree=Optimisers.setup(opt, params);
     end
+
+    if loss_fun_val == nothing
+        loss_fun_val = loss_fun
+    end
+    if aux_params != nothing
+        loss(x...) = loss_fun(x..., aux_params)
+        loss_val(x...) = loss_fun_val(x..., aux_params)
+    end
+
 
     if loss_train == nothing
         loss_train = fill(NaN,n_epochs)
@@ -287,7 +367,7 @@ function train!(model, data_loaders, params, loss, opt, n_epochs, loss_train=not
         for (d,s) in data_loaders.train
             if params isa Vector
                 gs = ReverseDiff.gradient(tuple(params...)) do p...
-                    training_loss = loss(d...,[p...])
+                    training_loss = loss(d,s,[p...])
                     return training_loss
                 end
                 Optimisers.update!(opt_tree,params,[gs...])
@@ -295,7 +375,7 @@ function train!(model, data_loaders, params, loss, opt, n_epochs, loss_train=not
                 restructure_update(model)
             elseif params isa Flux.Params
                 gs = Flux.gradient(params) do
-                    training_loss = loss(d...)
+                    training_loss = loss(d,s)
                     return training_loss
                 end
                 Flux.update!(opt, params, gs)
@@ -310,7 +390,7 @@ function train!(model, data_loaders, params, loss, opt, n_epochs, loss_train=not
 
         # Compute mean validation loss
         for (d,s) in data_loaders.validation
-            loss_v+=loss(d...)
+            loss_v+=loss_val(d,s)
         end
         loss_validation[e]=loss_v/length(data_loaders.validation)
         if verbose >= 2
