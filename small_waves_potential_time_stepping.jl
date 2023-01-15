@@ -125,7 +125,13 @@ function uw(x,z,t,H,δ)
     return hcat(sum(uw_vec)...)'
 end
 
+function H_δ(seed)
+    rng = MersenneTwister(seed)
+    H = rand(rng, Uniform(H_range[1],H_range[2]), n_freq_gen) .* exp.(-frequency_decay *  (0:n_freq_gen-1).^2)
+    δ = rand(rng, Uniform(0, 2*π), n_freq_gen)
 
+    return H,δ
+end
 function u_func(y, seed)
     if rescale
         x = y[1,:]*L
@@ -135,9 +141,7 @@ function u_func(y, seed)
         z = y[2,:]
     end
 
-    rng = MersenneTwister(seed)
-    H = rand(rng, Uniform(H_range[1],H_range[2]), n_freq_gen) .* exp.(-frequency_decay *  (0:n_freq_gen-1).^2)
-    δ = rand(rng, Uniform(0, 2*π), n_freq_gen)
+    H,δ = H_δ(seed)
 
     return ϕ(x,z,ti,H,δ)
 end
@@ -152,17 +156,14 @@ function v_func(y, seed)
         t = y[3,:]
     end
 
-
-    rng = MersenneTwister(seed)
-    H = rand(rng, Uniform(H_range[1],H_range[2]), n_freq_gen) .* exp.(-frequency_decay *  (0:n_freq_gen-1).^2)
-    δ = rand(rng, Uniform(0, 2*π), n_freq_gen)
+    H,δ = H_δ(seed)
 
     return ϕ(x,z,t,H,δ)
 end
 
 
 
-# Generate data
+## Generate data
 setup_hash = hash((n_sensors,yspan,n_u_trajectories,n_u_trajectories_test,n_u_trajectories_validation,n_y_eval,batch_size,n_freq_gen,frequency_decay,H_range))
 data_filename = "small_waves_potential_timestepping_data_hash_$setup_hash.jld2"
 
@@ -251,11 +252,10 @@ function loss_fun_physics_informed(
         end...
     )
 
-    preds_left_xpϵ = eval_trunk_and_combine(model,[(xi+ϵ) * similar_ones ; y[2:3,:]],b)
-    preds_right_xmϵ = eval_trunk_and_combine(model,[(xf-ϵ) * similar_ones ; y[2:3,:]],b)
-    preds_bottom_zpϵ = eval_trunk_and_combine(model,[y[1:1,:]; (zi+ϵ) * similar_ones; y[3:3,:]],b)
-    preds_top_zmϵ = eval_trunk_and_combine(model,[y[1:1,:] ; (zf-ϵ) * similar_ones; y[3:3,:]],b)
-
+    preds_left_xpϵ = eval_trunk_and_combine(model, [(xi+ϵ) * similar_ones ; y[2:3,:]],b)
+    preds_right_xmϵ = eval_trunk_and_combine(model, [(xf-ϵ) * similar_ones ; y[2:3,:]],b)
+    preds_bottom_zpϵ = eval_trunk_and_combine(model, [y[1:1,:]; (zi+ϵ) * similar_ones; y[3:3,:]],b)
+    preds_top_zmϵ = eval_trunk_and_combine(model, [y[1:1,:] ; (zf-ϵ) * similar_ones; y[3:3,:]],b)
     preds_top_tpϵ = eval_trunk_and_combine(model, [y[1:1,:] ; zf * similar_ones; y[3:3,:] .+ ϵ],b)
     preds_top_tmϵ = eval_trunk_and_combine(model, [y[1:1,:] ; zf * similar_ones; y[3:3,:] .- ϵ],b)
 
@@ -264,20 +264,19 @@ function loss_fun_physics_informed(
     preds_p_0ϵ0 = eval_trunk_and_combine(model, y .+ [0,ϵ,0],b)
     preds_m_0ϵ0 = eval_trunk_and_combine(model, y .- [0,ϵ,0],b)
 
-    ϕ_xx_deriv = (preds_p_ϵ00 + preds_m_ϵ00 - 2 * preds)/ϵx_scale^2
-    ϕ_zz_deriv = (preds_p_0ϵ0 + preds_m_0ϵ0 - 2 * preds)/ϵz_scale^2
-
-    x_deriv_left_ϵ = (preds_left_xpϵ - preds_left)/ϵx_scale
-    x_deriv_right_ϵ = (preds_right - preds_right_xmϵ)/ϵx_scale
-    z_deriv_bottom_ϵ = (preds_bottom_zpϵ - preds_bottom)/ϵz_scale
-    z_deriv_top_ϵ = (preds_top - preds_top_zmϵ)/ϵx_scale
-    ϕ_tt_deriv_top = (preds_top_tpϵ + preds_top_tmϵ - 2 * preds_top)/ϵt_scale^2
+    xx_deriv = (preds_p_ϵ00 + preds_m_ϵ00 - 2 * preds)/ϵx_scale^2
+    zz_deriv = (preds_p_0ϵ0 + preds_m_0ϵ0 - 2 * preds)/ϵz_scale^2
+    x_deriv_left = (preds_left_xpϵ - preds_left)/ϵx_scale
+    x_deriv_right = (preds_right - preds_right_xmϵ)/ϵx_scale
+    z_deriv_bottom = (preds_bottom_zpϵ - preds_bottom)/ϵz_scale
+    z_deriv_top = (preds_top - preds_top_zmϵ)/ϵz_scale
+    tt_deriv_top = (preds_top_tpϵ + preds_top_tmϵ - 2 * preds_top)/ϵt_scale^2
 
     physics_loss_initial = sum((preds_ini-analytical_ini).^2)
-    physics_loss_sides = sum((x_deriv_left_ϵ-x_deriv_right_ϵ).^2)
-    physics_loss_bottom = sum(z_deriv_bottom_ϵ.^2)
-    physics_loss_top = sum((z_deriv_top_ϵ + 1/g * ϕ_tt_deriv_top).^2)
-    physics_loss_interior = sum((ϕ_xx_deriv + ϕ_zz_deriv).^2)
+    physics_loss_sides = sum((x_deriv_left-x_deriv_right).^2)
+    physics_loss_bottom = sum(z_deriv_bottom.^2)
+    physics_loss_top = sum((z_deriv_top + 1/g * tt_deriv_top).^2)
+    physics_loss_interior = sum((xx_deriv + zz_deriv).^2)
     data_loss_squared = sum((preds .- v_vals).^2)
     regularisation_loss = sum(norm(Flux.params(model)))
 
@@ -289,7 +288,14 @@ aux_params = (model, yspan, ϵ, ϵx_scale, ϵz_scale, ϵt_scale)
 
 loss_fun_plain(((y, u_vals), v_vals), seed, aux_params) = Flux.mse(model(y,u_vals), v_vals)
 
+println("Loss times:")
 @time loss_fun_physics_informed(d,s,aux_params)
+@time loss_fun_physics_informed(d,s,aux_params)
+
+println("Evaluation times:")
+@time model(d[1]...)
+@time model(d[1]...)
+
 flush(stdout)
 
 
@@ -324,13 +330,13 @@ println(@sprintf "Validation loss (pure data): %.3e" loss_val_no_phys)
 
 
 flush(stdout)
-print("Mean of last 10 validation errors:\n$(mean(loss_validation[end-10:end]))")
+print("Mean of last $(min(10,n_epochs)) validation errors:\n$(mean(loss_validation[end-min(9,n_epochs-1):end]))")
 
 
 ## Plotting
 
 if do_plots
-    file_postfix = "_deep"
+    file_postfix = "_intermediate"
 
     plot_seed = n_u_trajectories + n_u_trajectories_validation + n_u_trajectories_test ÷ 2
     x_plot = xi:(xf-xi)/50:xf
@@ -400,5 +406,28 @@ if do_plots
     ylabel!("Loss (MSE)")
     savefig(p, "plots/small_waves_potential_timestepping_training$(file_postfix).pdf")
     display(p)
+
+
+    ## Loss vs time step
+    times = zeros(n_u_trajectories_test*n_y_eval)
+    Hs = zeros(n_u_trajectories_test*n_y_eval)
+    δs = zeros(n_u_trajectories_test*n_y_eval)
+    losses = zeros(n_u_trajectories_test*n_y_eval)
+    for (batch_id,(d,s)) in enumerate(loaders.test)
+        ((y, u_vals), v_vals) = d
+        for i in 1:batch_size
+            H,δ = H_δ(s[i])
+            Hs[(batch_id-1)*batch_size + i] = H[]
+            δs[(batch_id-1)*batch_size + i] = δ[]
+            times[(batch_id-1)*batch_size + i] = y[3,i]
+            losses[(batch_id-1)*batch_size + i] = loss_fun_plain(((y[:,i:i], (u_vals[1][:,i:i],)), v_vals[1:1,i:i]),s[i],aux_params)
+        end
+    end
+
+    pyplot_hexbin_times_inputs = (times,losses,(0:0.25:1, ["0", "0.25 T", "0.5 T", "0.75 T", "T"]),"Loss vs. time for test set","Time (unit of wave periods)","Squared error","plots/small_waves_potential_timestepping_loss_vs_time$(file_postfix).pdf")
+    pyplot_hexbin_H_inputs = (Hs,losses,([0.1,0.2,0.3,0.4,0.5],),"Loss vs. amplitude for test set","Amplitude, H","Squared error","plots/small_waves_potential_timestepping_loss_vs_H$(file_postfix).pdf")
+    pyplot_hexbin_delta_inputs = (δs,losses,([0,π,2π],["0","π","2π"]),"Loss vs. phase for test set","Phase, δ","Squared error","plots/small_waves_potential_timestepping_loss_vs_delta$(file_postfix).pdf")
+
+    FileIO.save("hexbin_plot_data_fixed_depth.jld2","pyplot_hexbin_times_inputs",pyplot_hexbin_times_inputs,"pyplot_hexbin_H_inputs",pyplot_hexbin_H_inputs,"pyplot_hexbin_delta_inputs",pyplot_hexbin_delta_inputs)
 
 end

@@ -581,7 +581,7 @@ loss_test = compute_total_loss(loaders.test)
 
 
 flush(stdout)
-print("Mean of last 10 validation errors:\n$(mean(loss_validation[end-10:end]))")
+print("Mean of last $(min(10,n_epochs)) validation errors:\n$(mean(loss_validation[end-min(9,n_epochs-1):end]))")
 
 
 ## Plotting

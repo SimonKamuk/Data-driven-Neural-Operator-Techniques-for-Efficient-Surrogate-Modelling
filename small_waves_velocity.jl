@@ -209,7 +209,7 @@ else
     end
 end
 
-
+d,s = first(loaders.train)
 
 ## Define layers
 
@@ -302,9 +302,14 @@ end
 
 loss_fun_plain(((y, u_vals), v_vals), seed) = Flux.mse(model(y,u_vals), v_vals)
 
-
-d,s = first(loaders.train)
+println("Loss times:")
 @time loss(d,s)
+@time loss(d,s)
+
+println("Evaluation times:")
+@time model(d[1]...)
+@time model(d[1]...)
+
 flush(stdout)
 
 
@@ -333,7 +338,7 @@ println(@sprintf "Validation loss (pure data): %.3e" loss_val_no_phys)
 
 
 flush(stdout)
-print("Mean of last 10 validation errors:\n$(mean(loss_validation[end-10:end]))")
+print("Mean of last $(min(10,n_epochs)) validation errors:\n$(mean(loss_validation[end-min(9,n_epochs-1):end]))")
 
 
 ## Plotting
