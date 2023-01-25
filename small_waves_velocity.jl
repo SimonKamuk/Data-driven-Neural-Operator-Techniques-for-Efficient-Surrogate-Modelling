@@ -7,7 +7,7 @@ using .MyDeepONet
 
 # Data setup
 L = 50 # base wave length [m]
-h = 4/(2*π/L) # water depth, [m]
+h = 1/(2*π/L) # water depth, [m]
 ρ = 1025 # saltwater density [kg/m^3]
 g = 9.82 # acceleration of gravity [m/s^2]
 H_range = [0.1,0.5]
@@ -39,6 +39,7 @@ save_on_recompute = false
 const_bias_trainable = false
 trunk_var_bias = true
 equidistant_y = false
+file_postfix = "_intermediate"
 
 # Model setup
 if length(ARGS) == 0
@@ -55,6 +56,9 @@ if length(ARGS) == 0
     physics_weight_boundary = 1.0
     physics_weight_interior = 1.0
     regularisation_weight = 1e-4
+
+    save_model = true
+    load_model = true
 
 else
     jobindex = parse(Int64, ARGS[1])
@@ -320,7 +324,19 @@ opt = Flux.NAdam()
 loss_train = fill(NaN,n_epochs)
 loss_validation = fill(NaN,n_epochs)
 verbose = 2
-train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose, loss_fun_plain)
+model_filename = "models/trained_model_waves_velocity$(file_postfix).jld2"
+if !load_model
+    train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose, loss_fun_plain)
+    if save_model
+        FileIO.save(model_filename,"model",model,"loss_train",loss_train,"loss_validation",loss_validation)
+    end
+else
+    loaded_model_file = FileIO.load(model_filename)
+    model = loaded_model_file["model"]
+    loss_train = loaded_model_file["loss_train"]
+    loss_validation = loaded_model_file["loss_validation"]
+end
+
 
 
 # To be used only after final model is selected
@@ -337,6 +353,14 @@ println(@sprintf "Test loss (pure data): %.3e" loss_test_no_phys)
 println(@sprintf "Validation loss (pure data): %.3e" loss_val_no_phys)
 
 
+all_v_vec::Vector{Float64} = []
+for (d,s) in loaders.test
+    append!(all_v_vec, d[2])
+end
+loss_null_guess=Flux.mse(zeros(size(all_v_vec)...), all_v_vec)
+println(@sprintf "Null guess, test loss (pure data): %.3e" loss_null_guess)
+
+
 flush(stdout)
 print("Mean of last $(min(10,n_epochs)) validation errors:\n$(mean(loss_validation[end-min(9,n_epochs-1):end]))")
 
@@ -344,8 +368,6 @@ print("Mean of last $(min(10,n_epochs)) validation errors:\n$(mean(loss_validati
 ## Plotting
 
 if do_plots
-    file_postfix = "_deep"
-
     plot_seed = n_u_trajectories + n_u_trajectories_validation + n_u_trajectories_test ÷ 2
     x_plot = xi:(xf-xi)/50:xf
     z_plot = zi:(zf-zi)/50:zf
@@ -362,67 +384,67 @@ if do_plots
     end
 
     p1=heatmap(x_plot, z_plot, deepo_solution[1,:,:], reuse = false, title="u, DeepONet\nprediction", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks)
-    xlabel!("x")
-    ylabel!("z")
-    title=@sprintf "u, Error\nMSE %.2e" Flux.mse(deepo_solution[1,:,:], v_vals_plot[1,:,:])
+    xlabel!("x [m]")
+    ylabel!("z [m]")
+    title=@sprintf "u [m/s], Error\nMSE %.2e" Flux.mse(deepo_solution[1,:,:], v_vals_plot[1,:,:])
     p2=heatmap(x_plot, z_plot, v_vals_plot[1,:,:]-deepo_solution[1,:,:], reuse = false, title=title, yticks=false,xticks=xticks)
-    xlabel!("x")
+    xlabel!("x [m]")
     p3=heatmap(x_plot, z_plot, v_vals_plot[1,:,:], reuse = false, title="u, Analytical\nsolution", clim=extrema([v_vals_plot;deepo_solution]), yticks=false,xticks=xticks)
-    xlabel!("x")
+    xlabel!("x [m]")
     p = plot(p1, p2, p3, reuse = false, layout = (1,3))
     savefig(p, "plots/small_waves_u_velocity_example$(file_postfix).pdf")
     display(p)
 
     p1=heatmap(x_plot, z_plot, deepo_solution[2,:,:], reuse = false, title="w, DeepONet\nprediction", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks)
-    xlabel!("x")
-    ylabel!("z")
-    title=@sprintf "w, Error\nMSE %.2e" Flux.mse(deepo_solution[2,:,:], v_vals_plot[2,:,:])
+    xlabel!("x [m]")
+    ylabel!("z [m]")
+    title=@sprintf "w [m/s], Error\nMSE %.2e" Flux.mse(deepo_solution[2,:,:], v_vals_plot[2,:,:])
     p2=heatmap(x_plot, z_plot, v_vals_plot[2,:,:]-deepo_solution[2,:,:], reuse = false, title=title, yticks=false,xticks=xticks)
-    xlabel!("x")
+    xlabel!("x [m]")
     p3=heatmap(x_plot, z_plot, v_vals_plot[2,:,:], reuse = false, title="w, Analytical\nsolution", clim=extrema([v_vals_plot;deepo_solution]), yticks=false,xticks=xticks)
-    xlabel!("x")
+    xlabel!("x [m]")
     p = plot(p1, p2, p3, reuse = false, layout = (1,3))
     savefig(p, "plots/small_waves_w_velocity_example$(file_postfix).pdf")
     display(p)
 
 
 
-    p=plot(x_plot, z_plot, deepo_solution[1,:,:], reuse = false, title="DeepONet prediction, u", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks, st=:surface, right_margin = 4Plots.mm)
-    xlabel!("x")
-    ylabel!("z")
+    p=plot(x_plot, z_plot, deepo_solution[1,:,:], reuse = false, title="DeepONet prediction, u [m/s]", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks, st=:surface, right_margin = 4Plots.mm)
+    xlabel!("x [m]")
+    ylabel!("z [m]")
     savefig(p, "plots/small_waves_u_velocity_example_3d_pred$(file_postfix).pdf")
     display(p)
 
-    title=@sprintf "Error, u, MSE %.2e" Flux.mse(deepo_solution[1,:,:], v_vals_plot[1,:,:])
+    title=@sprintf "Error, u [m/s], MSE %.2e" Flux.mse(deepo_solution[1,:,:], v_vals_plot[1,:,:])
     p=plot(x_plot, z_plot, v_vals_plot[1,:,:]-deepo_solution[1,:,:], reuse = false, title=title ,xticks=xticks, st=:surface, right_margin = 4Plots.mm)
-    xlabel!("x")
-    ylabel!("z")
+    xlabel!("x [m]")
+    ylabel!("z [m]")
     savefig(p, "plots/small_waves_u_velocity_example_3d_error$(file_postfix).pdf")
     display(p)
 
-    p=plot(x_plot, z_plot, v_vals_plot[1,:,:], reuse = false, title="Analytical solution, u", clim=extrema([v_vals_plot;deepo_solution]), xticks=xticks, st=:surface, right_margin = 4Plots.mm)
-    xlabel!("x")
-    ylabel!("z")
+    p=plot(x_plot, z_plot, v_vals_plot[1,:,:], reuse = false, title="Analytical solution, u [m/s]", clim=extrema([v_vals_plot;deepo_solution]), xticks=xticks, st=:surface, right_margin = 4Plots.mm)
+    xlabel!("x [m]")
+    ylabel!("z [m]")
     savefig(p, "plots/small_waves_u_velocity_example_3d_analytical$(file_postfix).pdf")
     display(p)
 
 
-    p=plot(x_plot, z_plot, deepo_solution[2,:,:], reuse = false, title="DeepONet prediction, w", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks, st=:surface, right_margin = 4Plots.mm)
-    xlabel!("x")
-    ylabel!("z")
+    p=plot(x_plot, z_plot, deepo_solution[2,:,:], reuse = false, title="DeepONet prediction, w [m/s]", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks, st=:surface, right_margin = 4Plots.mm)
+    xlabel!("x [m]")
+    ylabel!("z [m]")
     savefig(p, "plots/small_waves_w_velocity_example_3d_pred$(file_postfix).pdf")
     display(p)
 
-    title=@sprintf "Error, w, MSE %.2e" Flux.mse(deepo_solution[2,:,:], v_vals_plot[2,:,:])
+    title=@sprintf "Error, w [m/s], MSE %.2e" Flux.mse(deepo_solution[2,:,:], v_vals_plot[2,:,:])
     p=plot(x_plot, z_plot, v_vals_plot[2,:,:]-deepo_solution[2,:,:], reuse = false, title=title, xticks=xticks, st=:surface, right_margin = 4Plots.mm)
-    xlabel!("x")
-    ylabel!("z")
+    xlabel!("x [m]")
+    ylabel!("z [m]")
     savefig(p, "plots/small_waves_w_velocity_example_3d_error$(file_postfix).pdf")
     display(p)
 
-    p=plot(x_plot, z_plot, v_vals_plot[2,:,:], reuse = false, title="Analytical, solution, w", clim=extrema([v_vals_plot;deepo_solution]), xticks=xticks, st=:surface, right_margin = 4Plots.mm)
-    xlabel!("x")
-    ylabel!("z")
+    p=plot(x_plot, z_plot, v_vals_plot[2,:,:], reuse = false, title="Analytical, solution, w [m/s]", clim=extrema([v_vals_plot;deepo_solution]), xticks=xticks, st=:surface, right_margin = 4Plots.mm)
+    xlabel!("x [m]")
+    ylabel!("z [m]")
     savefig(p, "plots/small_waves_w_velocity_example_3d_analytical$(file_postfix).pdf")
     display(p)
 

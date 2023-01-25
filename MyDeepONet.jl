@@ -42,58 +42,53 @@ end
 @Flux.functor DeepONet
 
 
-function evaluate_branch(m::DeepONet,u_vals,p=nothing)
-    # if m.branch isa Array
-        if p==nothing
-            b_funs = m.branch
-        else
-            b_funs = m.branch_re(p[1])
-        end
-        if !(u_vals isa Tuple)
-            u_vals = (u_vals,)
-        end
-        b = prod(cat(
-                map(1:length(m.branch)) do i
-                    b_funs[i](u_vals[i])
-                end...,
-                dims=3
-            ),dims=3)[:,:,1]
-
-    # else
-    #     if p==nothing
-    #         b = m.branch(u_vals)
-    #     else
-    #         b = m.branch_re(p[1])(u_vals)
-    #     end
-    #     b = reshape(b,size(b,1),:)
-    # end
+function evaluate_branch(m::DeepONet,u_vals,p)
+    b_funs = m.branch_re(p[1])
+    if !(u_vals isa Tuple)
+        u_vals = (u_vals,)
+    end
+    b = prod(cat(
+            map(1:length(m.branch)) do i
+                b_funs[i](u_vals[i])
+            end...,
+            dims=3
+        ),dims=3)[:,:,1]
     return b
 end
-function evaluate_trunk(m::DeepONet,y,p=nothing)
-    # if m.trunk isa Array
-        if p==nothing
-            t_funs = m.trunk
-        else
-            t_funs = m.trunk_re(p[2])
-        end
-        return cat([reshape(t_fun(y),:,size(y,2)) for t_fun in t_funs]..., dims=3)
-
-    # else
-        # if p==nothing
-        #     t = m.trunk(y)
-        # else
-        #     t = m.trunk_re(p[2])(y)
-        # end
-        # return reshape(t,size(t,1),size(y,2),:)
-    # end
-
-end
-function combine_latent(m::DeepONet,t,b,p=nothing)
-    if p==nothing
-        bias = m.bias[]
-    else
-        bias = p[3][]
+function evaluate_branch(m::DeepONet,u_vals)
+    b_funs = m.branch
+    if !(u_vals isa Tuple)
+        u_vals = (u_vals,)
     end
+    b = prod(cat(
+            map(1:length(m.branch)) do i
+                b_funs[i](u_vals[i])
+            end...,
+            dims=3
+        ),dims=3)[:,:,1]
+    return b
+end
+function evaluate_trunk(m::DeepONet,y,p)
+    t_vals = [t_fun(y) for t_fun in m.trunk_re(p[2])]
+    return cat([reshape(t_val,:,size(y,2)) for t_val in t_vals]..., dims=3)
+end
+function evaluate_trunk(m::DeepONet,y)
+    t_vals = [t_fun(y) for t_fun in m.trunk]
+    return cat([reshape(t_val,:,size(y,2)) for t_val in t_vals]..., dims=3)
+end
+function combine_latent(m::DeepONet,t,b,p)
+
+    bias = p[3][]
+
+    if m.trunk_var_bias
+        return (sum(b .* t[begin:end-1,:,:], dims=1)[1,:,:] .+ bias .+ t[end,:,:])'
+    else
+        return (sum(b .* t, dims=1)[1,:,:] .+ bias)'
+    end
+end
+function combine_latent(m::DeepONet,t,b)
+    bias = m.bias[]
+
     if m.trunk_var_bias
         return (sum(b .* t[begin:end-1,:,:], dims=1)[1,:,:] .+ bias .+ t[end,:,:])'
     else
@@ -123,10 +118,15 @@ function get_params(m::DeepONet)
 end
 
 
-function (m::DeepONet)(y,u_vals,p=nothing)
+function (m::DeepONet)(y,u_vals,p)
     b = evaluate_branch(m,u_vals,p)
     t = evaluate_trunk(m,y,p)
     return combine_latent(m,t,b,p)
+end
+function (m::DeepONet)(y,u_vals)
+    b = evaluate_branch(m,u_vals)
+    t = evaluate_trunk(m,y)
+    return combine_latent(m,t,b)
 end
 
 
@@ -343,10 +343,10 @@ function train!(model, data_loaders, params, loss_fun, opt, n_epochs, loss_train
     if loss_fun_val == nothing
         loss_fun_val = loss_fun
     end
-    if aux_params != nothing
-        loss(x...) = loss_fun(x..., aux_params)
-        loss_val(x...) = loss_fun_val(x..., aux_params)
-    end
+
+    loss(x...) = aux_params!=nothing ? loss_fun(x..., aux_params) : loss_fun(x...)
+    loss_val(x...) = aux_params!=nothing ? loss_fun_val(x..., aux_params) : loss_fun_val(x...)
+
 
 
     if loss_train == nothing

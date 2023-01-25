@@ -1,6 +1,6 @@
 using Flux, Plots, StatsPlots
 
-input_filename = "output/deeponet_param_search_15142534_"
+input_filename = "output/deeponet_param_search_15190550_"
 ext = ".out"
 min_loss = (Inf,-1)
 
@@ -37,19 +37,40 @@ min_loss = (Inf,-1)
 # ]
 
 # 15142534
+# params = [
+# (bw, tw, bd, td)
+# for bw in [35, 50, 65]
+# for tw in [35, 50, 65]
+# for bd in [3,4,5,6]
+# for td in [3,4,5,6]
+# ]
+# param_names = [
+#     "Branch width",
+#     "Trunk width",
+#     "Branch depth",
+#     "Trunk depth",
+# ]
+
+
 params = [
-(bw, tw, bd, td)
-for bw in [35, 50, 65]
-for tw in [35, 50, 65]
-for bd in [3,4,5,6]
-for td in [3,4,5,6]
+(n_sensors,trunk_width,branch_width,latent_size,branch_depth,trunk_depth)
+for n_sensors in [50,100,150]
+for trunk_width in [50,75,100]
+for branch_width in [50,75,100]
+for latent_size in [50,75,100]
+for branch_depth in [3,4,5]
+for trunk_depth in [4,5,6,7]
 ]
 param_names = [
-    "Branch width",
+    "Number of sensors",
     "Trunk width",
+    "Branch width",
+    "Latent space size",
     "Branch depth",
     "Trunk depth",
 ]
+
+
 
 n_params = length(params[1])
 loss_values = [Dict() for _ in 1:n_params]
@@ -114,7 +135,7 @@ for param_type_id in 1:length(loss_values)
     p=StatsPlots.boxplot(x_labels, param_loss, legend=false, yscale=:log10, whisker_range=Inf)
     title!(title)
     ylabel!("Loss, mean of last 10 epochs")
-    savefig(p, "plots/conv_diff_param_search_$(lowercase(replace(title," "=>"_"))).pdf")
+    savefig(p, "plots/small_wave_polychromatic_$(lowercase(replace(title," "=>"_"))).pdf")
     display(p)
 
 end

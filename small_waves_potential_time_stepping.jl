@@ -29,6 +29,7 @@ const_bias_trainable = false
 trunk_var_bias = true
 equidistant_y = false
 use_plain_loss = false
+file_postfix = "_intermediate"
 
 # Model setup
 if length(ARGS) == 0
@@ -46,6 +47,9 @@ if length(ARGS) == 0
     physics_weight_interior = 1.0
     physics_weight_initial = 1.0
     regularisation_weight = 1e-4
+
+    save_model = true
+    load_model = true
 
 else
     jobindex = parse(Int64, ARGS[1])
@@ -312,7 +316,20 @@ end
 loss_train = fill(NaN,n_epochs)
 loss_validation = fill(NaN,n_epochs)
 verbose = 2
-train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose, loss_fun_plain, aux_params)
+
+model_filename = "models/trained_model_waves_timestepping$(file_postfix).jld2"
+if !load_model
+    train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose, loss_fun_plain, aux_params)
+    if save_model
+        FileIO.save(model_filename,"model",model,"loss_train",loss_train,"loss_validation",loss_validation)
+    end
+else
+    loaded_model_file = FileIO.load(model_filename)
+    model = loaded_model_file["model"]
+    loss_train = loaded_model_file["loss_train"]
+    loss_validation = loaded_model_file["loss_validation"]
+end
+
 
 
 # To be used only after final model is selected
@@ -328,6 +345,13 @@ loss_val_no_phys = compute_total_loss(loaders.validation)
 println(@sprintf "Test loss (pure data): %.3e" loss_test_no_phys)
 println(@sprintf "Validation loss (pure data): %.3e" loss_val_no_phys)
 
+all_v_vec::Vector{Float64} = []
+for (d,s) in loaders.test
+    append!(all_v_vec, d[2])
+end
+loss_null_guess=Flux.mse(zeros(size(all_v_vec)...), all_v_vec)
+println(@sprintf "Null guess, test loss (pure data): %.3e" loss_null_guess)
+
 
 flush(stdout)
 print("Mean of last $(min(10,n_epochs)) validation errors:\n$(mean(loss_validation[end-min(9,n_epochs-1):end]))")
@@ -336,7 +360,6 @@ print("Mean of last $(min(10,n_epochs)) validation errors:\n$(mean(loss_validati
 ## Plotting
 
 if do_plots
-    file_postfix = "_intermediate"
 
     plot_seed = n_u_trajectories + n_u_trajectories_validation + n_u_trajectories_test ÷ 2
     x_plot = xi:(xf-xi)/50:xf
@@ -359,42 +382,42 @@ if do_plots
         scaled_x_locs = x_locs
     end
 
-    p1=heatmap(x_plot, z_plot, deepo_solution, reuse = false, title="DeepONet\nprediction", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks)
-    xlabel!("x")
-    ylabel!("z")
-    title=@sprintf "Error\nMSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
+    p1=heatmap(x_plot, z_plot, deepo_solution, reuse = false, title="DeepONet\nprediction ϕ [m²/s]", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks)
+    xlabel!("x [m]")
+    ylabel!("z [m]")
+    title=@sprintf "Error ϕ [m²/s]\nMSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
     p2=heatmap(x_plot, z_plot, v_vals_plot-deepo_solution, reuse = false, title=title, yticks=false,xticks=xticks)
-    xlabel!("x")
-    p3=heatmap(x_plot, z_plot, v_vals_plot, reuse = false, title="Analytical\nsolution", clim=extrema([v_vals_plot;deepo_solution]), yticks=false,xticks=xticks)
-    xlabel!("x")
+    xlabel!("x [m]")
+    p3=heatmap(x_plot, z_plot, v_vals_plot, reuse = false, title="Analytical\nsolution ϕ [m²/s]", clim=extrema([v_vals_plot;deepo_solution]), yticks=false,xticks=xticks)
+    xlabel!("x [m]")
     p = plot(p1, p2, p3, reuse = false, layout = (1,3))
     savefig(p, "plots/small_waves_potential_timestepping_example$(file_postfix).pdf")
     display(p)
 
 
-    title=@sprintf "Error at t=T/2, MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
+    title=@sprintf "ϕ [m²/s] error at t=T/2, MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
     p=plot(x_plot, z_plot, v_vals_plot-deepo_solution, reuse = false, title=title ,xticks=xticks, st=:surface, right_margin = 4Plots.mm)
-    xlabel!("x")
-    ylabel!("z")
+    xlabel!("x [m]")
+    ylabel!("z [m]")
     savefig(p, "plots/small_waves_potential_timestepping_example_3d_error$(file_postfix).pdf")
     display(p)
 
-    p=plot(x_plot, z_plot, deepo_solution, reuse = false, title="DeepONet prediction at t=T/2", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks, st=:surface, right_margin = 4Plots.mm)
-    xlabel!("x")
-    ylabel!("z")
+    p=plot(x_plot, z_plot, deepo_solution, reuse = false, title="ϕ [m²/s] DeepONet prediction at t=T/2", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks, st=:surface, right_margin = 4Plots.mm)
+    xlabel!("x [m]")
+    ylabel!("z [m]")
     savefig(p, "plots/small_waves_potential_timestepping_example_3d_pred$(file_postfix).pdf")
     display(p)
 
-    p=plot(x_plot, z_plot, v_vals_plot, reuse = false, title="Analytical solution at t=T/2", clim=extrema([v_vals_plot;deepo_solution]), xticks=xticks, st=:surface, right_margin = 4Plots.mm)
-    xlabel!("x")
-    ylabel!("z")
+    p=plot(x_plot, z_plot, v_vals_plot, reuse = false, title="ϕ [m²/s] analytical solution at t=T/2", clim=extrema([v_vals_plot;deepo_solution]), xticks=xticks, st=:surface, right_margin = 4Plots.mm)
+    xlabel!("x [m]")
+    ylabel!("z [m]")
     savefig(p, "plots/small_waves_potential_timestepping_example_3d_analytical$(file_postfix).pdf")
     display(p)
 
-    p=plot(x_plot, z_plot, input_fun_plot, reuse = false, title="Input function (t=0)", clim=extrema([v_vals_plot;deepo_solution]), xticks=xticks, st=:surface, right_margin = 4Plots.mm)
+    p=plot(x_plot, z_plot, input_fun_plot, reuse = false, title="ϕ [m²/s] input function (t=0 T)", clim=extrema([v_vals_plot;deepo_solution]), xticks=xticks, st=:surface, right_margin = 4Plots.mm)
     scatter!(scaled_x_locs[1,:],scaled_x_locs[2,:],u_vals_plot,color=:black,label="Sensors")
-    xlabel!("x")
-    ylabel!("z")
+    xlabel!("x [m]")
+    ylabel!("z [m]")
     savefig(p, "plots/small_waves_potential_timestepping_example_3d_input_fun$(file_postfix).pdf")
     display(p)
 
@@ -424,8 +447,8 @@ if do_plots
         end
     end
 
-    pyplot_hexbin_times_inputs = (times,losses,(0:0.25:1, ["0", "0.25 T", "0.5 T", "0.75 T", "T"]),"Loss vs. time for test set","Time (unit of wave periods)","Squared error","plots/small_waves_potential_timestepping_loss_vs_time$(file_postfix).pdf")
-    pyplot_hexbin_H_inputs = (Hs,losses,([0.1,0.2,0.3,0.4,0.5],),"Loss vs. amplitude for test set","Amplitude, H","Squared error","plots/small_waves_potential_timestepping_loss_vs_H$(file_postfix).pdf")
+    pyplot_hexbin_times_inputs = (times,losses,(0:0.25:1, ["0 T", "0.25 T", "0.5 T", "0.75 T", "T"]),"Loss vs. time for test set","Time (unit of wave periods)","Squared error","plots/small_waves_potential_timestepping_loss_vs_time$(file_postfix).pdf")
+    pyplot_hexbin_H_inputs = (Hs,losses,([0.1,0.2,0.3,0.4,0.5],),"Loss vs. amplitude for test set","Amplitude, H [m]","Squared error","plots/small_waves_potential_timestepping_loss_vs_H$(file_postfix).pdf")
     pyplot_hexbin_delta_inputs = (δs,losses,([0,π,2π],["0","π","2π"]),"Loss vs. phase for test set","Phase, δ","Squared error","plots/small_waves_potential_timestepping_loss_vs_delta$(file_postfix).pdf")
 
     FileIO.save("hexbin_plot_data_fixed_depth.jld2","pyplot_hexbin_times_inputs",pyplot_hexbin_times_inputs,"pyplot_hexbin_H_inputs",pyplot_hexbin_H_inputs,"pyplot_hexbin_delta_inputs",pyplot_hexbin_delta_inputs)

@@ -85,7 +85,23 @@ model = DeepONet(trunk=trunk, branch=branch, const_bias_trainable=true)
 loss(((y, u_vals), v_y_true),s) = Flux.mse(model(y,u_vals), v_y_true)
 params = Flux.params(model)
 
+## Prediction time and null guess
 
+println("Evaluation times per batch:")
+args = first(loaders.train)
+@time model(args[1][1]...)
+@time model(args[1][1]...)
+
+
+all_v_vec::Vector{Float64} = []
+for (d,s) in loaders.test
+    append!(all_v_vec, d[2])
+end
+loss_null_guess=Flux.mse(zeros(size(all_v_vec)...), all_v_vec)
+null_guess_string = @sprintf "Null guess, test loss (pure data): %.3e" loss_null_guess
+println("")
+println(null_guess_string)
+flush(stdout)
 ## Training loop
 opt = NAdam()
 # opt = Adam()

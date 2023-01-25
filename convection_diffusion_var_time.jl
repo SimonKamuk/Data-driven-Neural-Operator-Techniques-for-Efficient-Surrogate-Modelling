@@ -17,7 +17,6 @@ n_u_trajectories_test = 1000
 n_u_trajectories_validation = 1000
 n_y_eval = 200
 batch_size = 50
-n_epochs = 200
 n_freq_fft = 200
 n_freq_gen = 100
 n_spatial_finite_diff = 200
@@ -25,22 +24,36 @@ frequency_decay = 0.25  # Larger number means faster decay, meaning fewer high f
 Random.seed!(0)
 flux_ini = Flux.glorot_uniform(MersenneTwister(rand(Int64)))
 recompute_data = false
-save_on_recompute = false
-training_var_time = true
+save_on_recompute = true
 const_bias_trainable = false
 trunk_var_bias = true
 equidistant_y = false
 
+training_var_time = false
+
 
 # Model setup
 if length(ARGS) == 0
-    n_sensors = 50
-    branch_width = 35
-    trunk_width = 65
-    branch_depth = 3
-    trunk_depth = 5
-    latent_size = 75
-    activation_function = softplus
+
+    if training_var_time
+        n_sensors = 50
+        branch_width = 35
+        trunk_width = 65
+        branch_depth = 3
+        trunk_depth = 5
+        latent_size = 75
+        activation_function = softplus
+        n_epochs = 200
+    else
+        n_sensors = 100
+        branch_width = 75
+        trunk_width = 75
+        branch_depth = 4
+        trunk_depth = 4
+        latent_size = 100
+        activation_function = relu
+        n_epochs = 50
+    end
     physics_weight_initial = 0.0
     physics_weight_boundary = 0.0
     physics_weight_interior = 0.0
@@ -297,6 +310,10 @@ function eval_trunk_and_combine(yy,bb,p)
     return combine_latent(model,evaluate_trunk(model,yy,p),bb,p)
 end
 
+function eval_trunk_and_combine(yy,bb)
+    return combine_latent(model,evaluate_trunk(model,yy),bb)
+end
+
 if PI_use_AD
     params = get_params(model)
 else
@@ -305,6 +322,7 @@ end
 
 if training_var_time
     ϵ = Float64(eps(float_type_func==f32 ? Float32 : Float64)^(1/3))
+
     first_deriv_compiled_tape = nothing
     second_deriv_compiled_tape = nothing
     function loss(((yt, u_vals), v_y_true),s, p=nothing)
@@ -538,6 +556,45 @@ if training_var_time
         end
         return 2*(data_loss_squared * data_weight + physics_loss_initial * physics_weight_initial + physics_loss_boundary * physics_weight_boundary + physics_loss_interior * physics_weight_interior) / batch_size + regularisation_loss * regularisation_weight
     end
+
+
+    function loss(((yt, u_vals), v_y_true),s)
+        sensor_idx = rand(MersenneTwister(0),1:n_sensors,batch_size)  # Randomly select which sensors are used for initial value loss
+        random_sensors = [u_vals[1][sensor_idx[i],i] for i in 1:batch_size]'
+
+        b = evaluate_branch(model,u_vals)
+
+        similar_ones = ones(eltype(yt),1,size(yt,2))
+
+        t = evaluate_trunk(model,yt)
+        t_sensors = evaluate_trunk(model,[x_locs[sensor_idx]' ; ti * similar_ones])
+        t_left = evaluate_trunk(model,[xi * similar_ones ; yt[2,:]'])
+        t_right = evaluate_trunk(model,[xf * similar_ones ; yt[2,:]'])
+
+        preds = combine_latent(model,t,b)
+
+
+        preds_p_ϵ0 = eval_trunk_and_combine(yt .+ [ϵ,0],b)
+        preds_m_ϵ0 = eval_trunk_and_combine(yt .- [ϵ,0],b)
+        preds_p_0ϵ = eval_trunk_and_combine(yt .+ [0,ϵ],b)
+        preds_m_0ϵ = eval_trunk_and_combine(yt .- [0,ϵ],b)
+
+        y1_2_deriv = (preds_p_ϵ0 .+ preds_m_ϵ0 .- 2 * preds)/ϵ^2
+        y1_1_deriv = (preds_p_ϵ0 .- preds_m_ϵ0)/(2*ϵ)
+        y2_1_deriv = (preds_p_0ϵ .- preds_m_0ϵ)/(2*ϵ)
+
+        physics_loss_interior = sum((D * y1_2_deriv .- vel * y1_1_deriv .- y2_1_deriv).^2)
+
+        physics_loss_boundary = sum((combine_latent(model,t_left-t_right,b)).^2)  # because inner product is linear operation
+
+        physics_loss_initial = sum((combine_latent(model,t_sensors,b) .- random_sensors).^2)
+
+        data_loss_squared = sum((preds .- v_y_true).^2)
+
+        regularisation_loss = sum(norm(Flux.params(model)))
+
+        return 2*(data_loss_squared * data_weight + physics_loss_initial * physics_weight_initial + physics_loss_boundary * physics_weight_boundary + physics_loss_interior * physics_weight_interior) / batch_size + regularisation_loss * regularisation_weight
+    end
 else
     loss(((y, u_vals), v_y_true),s) = Flux.mse(model(y,u_vals), v_y_true)
 end
@@ -553,6 +610,25 @@ flush(stdout)
 
 # d=first(loaders.train)[1]
 # println(PI_use_AD ? loss(d..., params) : loss(d...))
+
+## Prediction time and null guess
+
+println("Evaluation times per batch:")
+args = first(loaders.train)
+@time model(args[1][1]...)
+@time model(args[1][1]...)
+
+
+all_v_vec::Vector{Float64} = []
+for (d,s) in loaders.test
+    append!(all_v_vec, d[2])
+end
+loss_null_guess=Flux.mse(zeros(size(all_v_vec)...), all_v_vec)
+null_guess_string = @sprintf "Null guess, test loss (pure data): %.3e" loss_null_guess
+println("")
+println(null_guess_string)
+flush(stdout)
+
 
 ## Training loop
 if PI_use_AD
@@ -577,7 +653,7 @@ function compute_total_loss(loader)
     return loss_test
 end
 loss_test = compute_total_loss(loaders.test)
-# println(@sprintf "Test loss: %.3e" loss_test)
+println(@sprintf "Test loss: %.3e" loss_test)
 
 
 flush(stdout)

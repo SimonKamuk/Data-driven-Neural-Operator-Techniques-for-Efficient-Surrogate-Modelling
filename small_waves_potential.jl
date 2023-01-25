@@ -42,6 +42,8 @@ if length(ARGS) == 0
     latent_size = 75
     activation_function = softplus
     do_plots = true
+    save_model = true
+    load_model = true
 else
     jobindex = parse(Int64, ARGS[1])
 
@@ -240,7 +242,20 @@ opt = Flux.NAdam()
 loss_train = fill(NaN,n_epochs)
 loss_validation = fill(NaN,n_epochs)
 verbose = 2
-train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose)
+file_postfix = ""
+model_filename = "models/trained_model_waves_potential$(file_postfix).jld2"
+if !load_model
+    train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose)
+    if save_model
+        FileIO.save(model_filename,"model",model,"loss_train",loss_train,"loss_validation",loss_validation)
+    end
+else
+    loaded_model_file = FileIO.load(model_filename)
+    model = loaded_model_file["model"]
+    loss_train = loaded_model_file["loss_train"]
+    loss_validation = loaded_model_file["loss_validation"]
+end
+
 
 # To be used only after final model is selected
 function compute_total_loss(loader)
@@ -252,6 +267,13 @@ function compute_total_loss(loader)
 end
 loss_test = compute_total_loss(loaders.test)
 # println(@sprintf "Test loss: %.3e" loss_test)
+
+all_v_vec::Vector{Float64} = []
+for (d,s) in loaders.test
+    append!(all_v_vec, d[2])
+end
+loss_null_guess=Flux.mse(zeros(size(all_v_vec)...), all_v_vec)
+println(@sprintf "Null guess, test loss (pure data): %.3e" loss_null_guess)
 
 
 flush(stdout)
@@ -269,14 +291,14 @@ if do_plots
     u_vals_plot = u_func(x_locs, plot_seed)
     v_vals_plot = reshape(v_func(y_plot, plot_seed), length(z_plot), length(x_plot))
     deepo_solution = reshape(model(y_plot, u_vals_plot)[:], length(z_plot), length(x_plot))
-    p1=heatmap(x_plot, z_plot, deepo_solution, reuse = false, title="DeepONet\nprediction", clim=extrema([v_vals_plot;deepo_solution]),xticks=[xi,(xi+xf)/2,xf])
-    xlabel!("x")
-    ylabel!("z")
-    title=@sprintf "Error\nMSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
+    p1=heatmap(x_plot, z_plot, deepo_solution, reuse = false, title=" ϕ [m²/s] DeepONet\nprediction", clim=extrema([v_vals_plot;deepo_solution]),xticks=[xi,(xi+xf)/2,xf])
+    xlabel!("x [m]")
+    ylabel!("z [m]")
+    title=@sprintf " ϕ [m²/s] error\nMSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
     p2=heatmap(x_plot, z_plot, v_vals_plot-deepo_solution, reuse = false, title=title, yticks=false,xticks=[xi,(xi+xf)/2,xf])
-    xlabel!("x")
-    p3=heatmap(x_plot, z_plot, v_vals_plot, reuse = false, title="Analytical\nsolution", clim=extrema([v_vals_plot;deepo_solution]), yticks=false,xticks=[xi,(xi+xf)/2,xf])
-    xlabel!("x")
+    xlabel!("x [m]")
+    p3=heatmap(x_plot, z_plot, v_vals_plot, reuse = false, title=" ϕ [m²/s] analytical\nsolution", clim=extrema([v_vals_plot;deepo_solution]), yticks=false,xticks=[xi,(xi+xf)/2,xf])
+    xlabel!("x [m]")
     p = plot(p1, p2, p3, reuse = false, layout = (1,3))
     savefig(p, "plots/small_waves_potential_example.pdf")
     display(p)
