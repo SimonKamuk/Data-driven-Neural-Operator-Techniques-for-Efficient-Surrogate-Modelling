@@ -30,7 +30,7 @@ const use_plain_loss::Bool = false
 
 # Model setup
 if length(ARGS) == 0
-    const n_epochs::Int64 = 100
+    const n_epochs::Int64 = 300
     const n_sensors::Int64 = 110
     const branch_width::Int64 = 40
     const trunk_width::Int64 = 70
@@ -40,17 +40,19 @@ if length(ARGS) == 0
     const activation_function = softplus
     const do_plots::Bool = true
 
+    const n_freq_gen::Int64 = 100
+    file_postfix::String = n_freq_gen == 1 ? "" : "_polychrome"
+    const n_freq_mono::Int64 = n_freq_gen != 1 ? 10 : 0
+
     const data_weight::Float64 = 1.0
     const physics_weight_boundary::Float64 = 1.0
     const physics_weight_interior::Float64 = 1.0
     const physics_weight_initial::Float64 = 1.0
+    const physics_weight_final::Float64 = 1.0  # No effect in monochromatic case
     const regularisation_weight::Float64 = 1e-4
 
-    const n_freq_gen::Int64 = 1
-    file_postfix::String = n_freq_gen == 1 ? "" : "_polychrome"
-
     const save_model::Bool = true
-    const load_model::Bool = false
+    const load_model::Bool = true
 
 else
     jobindex = parse(Int64, ARGS[1])
@@ -83,6 +85,7 @@ else
     const physics_weight_boundary::Float64 = 1.0
     const physics_weight_interior::Float64 = 1.0
     const physics_weight_initial::Float64 = 1.0
+    const physics_weight_final::Float64 = 1.0  # No effect in monochromatic case
     const regularisation_weight::Float64 = 1e-4
 
     file_postfix::String = ""
@@ -102,11 +105,6 @@ tf = 1
 
 const yspan::Matrix{Float64} = Float64.([xi xf;zi zf; ti tf])
 
-# const x_locs::Matrix{Float64} = hcat(
-#     [
-#         rand(Uniform(yspan[i,begin], yspan[i,end]), n_sensors)
-#         for i in 1:2
-#     ]...)'
 const x_locs::Matrix{Float64} = hcat(
     rand(Uniform(yspan[1,begin], yspan[1,end]), n_sensors),
     fill(zf,n_sensors)
@@ -116,6 +114,7 @@ const x_locs::Matrix{Float64} = hcat(
 const L_vec::Matrix{Float64} = reshape([L/i for i in 1:n_freq_gen],1,:)
 const k_vec::Matrix{Float64} = reshape([2*π/l for l in L_vec],1,:)
 const c_prefactor::Matrix{Float64} = reshape([sqrt( g*l/(2*π) ) for l in L_vec],1,:)
+
 
 function ϕ(x,z,t,H,δ,h)
     c_vec = c_prefactor .* sqrt.( tanh.(2*π*h./L_vec) )
@@ -207,32 +206,72 @@ function v_func(y, seed)
 
     return ϕ(x,z,t,H,δ,h)
 end
+function v_func(y, H,δ,kh)
+    h = kh/(2*π/L) # water depth, [m]
+    T = L./(sqrt.(g*L/(2*π) * tanh.(2*π*h/L)))
 
+    x = y[1,:]*L
+    z = (y[2,:].-1).*h
+    t = y[3,:].*T
 
+    return ϕ(x,z,t,H,δ,h)
+end
 
-# Old function definitions
-# function ϕ(x,z,t,H,δ)
+#ϕ_mono(x,z,ti,H[:,i],δ[:,i],h,L_vec[i])
+
+# function ϕ_mono(x,z,t,H,δ,h,L)
+#     k = 2*π/L
+#     c = @. sqrt( g*L/(2*π) * tanh(2*π*h/L) )
+#     T = L./c
+#     ω = 2*π./T
 #
-#     ϕ_vec = map(1:n_freq_gen) do i
-#         Li = L/i
-#         ci = sqrt(g*Li/(2*π) * tanh(2*π*h/Li))
-#         Ti = Li/ci
-#         ki = 2*π/Li
-#         ωi = 2*π/Ti
+#     ϕ = -H.*c/2 .* cosh.(k.*(z.+h)) ./ sinh.(k.*h) .* sin.(ω.*t.-k.*x.+δ)
 #
-#         return @. -H[i]*ci/2 * cosh(ki*(z+h)) / sinh(ki*h) * sin(ωi*t-ki*x+δ[i])
-#     end
-#
-#     return sum(ϕ_vec)
+#     return ϕ
 # end
-# function H_δ_kh(seed)
-#     rng = MersenneTwister(seed)
-#     H = rand(rng, Uniform(H_range[1],H_range[2]), n_freq_gen) .* exp.(-frequency_decay *  (0:n_freq_gen-1).^2)
-#     δ = rand(rng, Uniform(0, 2*π), n_freq_gen)
-#     kh = rand(rng, Uniform(kh_range[1],kh_range[2]),1)
-#
-#     return H,δ,kh
-# end
+
+
+##
+
+function ϕ_mono(x,z,t,H,δ,h)
+    c_vec = c_prefactor[:,1:n_freq_mono] .* sqrt.( tanh.(2*π*h./L_vec[:,1:n_freq_mono]) )
+    T_vec = L_vec[:,1:n_freq_mono]./c_vec
+    ω_vec = 2*π./T_vec
+
+    ϕ_vec = -H.*c_vec/2 .* cosh.(k_vec[:,1:n_freq_mono].*(z.+h)) ./ sinh.(k_vec[:,1:n_freq_mono].*h) .* sin.(ω_vec.*t.-k_vec[:,1:n_freq_mono].*x.+δ)
+
+    return ϕ_vec
+end
+
+
+function u_func_mono_poly(y, seed)
+    H,δ,kh = H_δ_kh(seed)
+
+    h = kh/(2*π/L) # water depth, [m]
+
+    x = y[1][1,:]*L
+    z = (y[1][2,:].-1).*h
+
+    ϕ_poly_vec = ϕ(x,z,ti,H,δ,h)
+
+    ϕ_mono_vec = ϕ_mono(x,z,ti,H[:,1:min(n_freq_mono,n_freq_gen)],δ[:,1:min(n_freq_mono,n_freq_gen)],h)
+
+    return (ϕ_poly_vec,eachcol(ϕ_mono_vec)...)
+end
+function v_func_mono_poly(y, seed)
+    H,δ,kh = H_δ_kh(seed)
+
+    h = kh/(2*π/L) # water depth, [m]
+    T = L./(sqrt.(g*L/(2*π) * tanh.(2*π*h/L)))
+
+    x = y[1,:]*L
+    z = (y[2,:].-1).*h
+    t = y[3,:].*T
+
+    return hcat(ϕ(x,z,t,H,δ,h), ϕ_mono(x,z,ti,H[:,1:min(n_freq_mono,n_freq_gen)],δ[:,1:min(n_freq_mono,n_freq_gen)],h))'
+end
+
+
 
 ## Generate data
 setup_hash = hash((n_sensors,yspan,n_u_trajectories,n_u_trajectories_test,n_u_trajectories_validation,n_y_eval,batch_size,n_freq_gen,frequency_decay,H_range))
@@ -244,7 +283,12 @@ if isfile(data_filename) && !recompute_data
     flush(stdout)
 else
     y_locs = generate_y_locs(yspan, n_y_eval, n_u_trajectories+n_u_trajectories_test+n_u_trajectories_validation, equidistant_y)
-    loaders = generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size; equidistant_y=equidistant_y, y_locs=y_locs)
+    if n_freq_gen == 1
+        loaders = generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size; equidistant_y=equidistant_y, y_locs=y_locs)
+    else
+        loaders = generate_data((x_locs,[fill(0,n_sensors) for _ in 1:n_freq_mono]...), yspan, u_func_mono_poly, v_func_mono_poly, n_sensors, n_u_trajectories, n_u_trajectories_validation, n_u_trajectories_test, n_y_eval, batch_size; equidistant_y=equidistant_y, y_locs=y_locs, vdim=n_freq_mono+1)
+    end
+
     if save_on_recompute
         FileIO.save(data_filename,"loaders",loaders)
     end
@@ -288,50 +332,46 @@ function eval_trunk_and_combine(model::DeepONet,yy::Matrix{Float64},bb::Matrix{F
     return combine_latent(model,evaluate_trunk(model,yy),bb)
 end
 function loss_fun_physics_informed(
-        ((y, u_vals), v_vals)::Tuple{Tuple{Matrix{Float64}, Tuple{Matrix{Float64}}}, Matrix{Float64}},
+        ((y, u_vals), v_vals)::Tuple{Tuple{Matrix{Float64}, NTuple{n_freq_mono+1, Matrix{Float64}}}, Matrix{Float64}},
         seed::Vector{Int64},
         model::DeepONet)
 
+
     H_vec,δ_vec,kh_vec = H_δ_kh(seed)
-    h_vec = kh_vec[:,1] ./ (2*π/L)#[H_δ_kh(s)[3][1]/(2*π/L) for s in seed]
-    T_vec = ((g/(L*2*π)) .* tanh.((2*π/L).*h_vec)).^(-1/2)
+    h_vec = kh_vec[:,1] ./ (2*π/L)
+    c_vec = c_prefactor[:,1:max(1,n_freq_mono)] .* sqrt.( tanh.(2*π*h_vec./L_vec[:,1:max(1,n_freq_mono)]) )
+    T_vec = L_vec[:,1:max(1,n_freq_mono)]./c_vec
+
+
 
     ϵx_scale = ϵ*L
     ϵz_scale = ϵ*h_vec'
-    ϵt_scale = ϵ*T_vec'
+    ϵt_scale = ϵ*T_vec[:,1]'
 
     xi, zi, ti, xf, zf, tf = yspan[:]
 
-    b = evaluate_branch(model,u_vals)
+    b = evaluate_branch(model,u_vals[1])
 
-    # similar_ones = ones(eltype(y),1,size(y,2))
-    analytical_ini = u_func([y[1:2,:] ; fill(ti, 1, batch_size)], H_vec,δ_vec,kh_vec)'
-
-    # preds = eval_trunk_and_combine(model,y,b)
-    # preds_left = eval_trunk_and_combine(model,[xi * similar_ones ; y[2:3,:]],b)
-    # preds_right = eval_trunk_and_combine(model,[xf * similar_ones ; y[2:3,:]],b)
-    # preds_bottom = eval_trunk_and_combine(model,[y[1:1,:]; zi * similar_ones; y[3:3,:]],b)
-    # preds_top = eval_trunk_and_combine(model,[y[1:1,:] ; zf * similar_ones; y[3:3,:]],b)
-    # preds_ini = eval_trunk_and_combine(model,[y[1:2,:]; ti * similar_ones],b)
-    # preds_left_xpϵ = eval_trunk_and_combine(model, [(xi+ϵ) * similar_ones ; y[2:3,:]],b)
-    # preds_right_xmϵ = eval_trunk_and_combine(model, [(xf-ϵ) * similar_ones ; y[2:3,:]],b)
-    # preds_bottom_zpϵ = eval_trunk_and_combine(model, [y[1:1,:]; (zi+ϵ) * similar_ones; y[3:3,:]],b)
-    # preds_top_zmϵ = eval_trunk_and_combine(model, [y[1:1,:] ; (zf-ϵ) * similar_ones; y[3:3,:]],b)
-    # preds_top_tpϵ = eval_trunk_and_combine(model, [y[1:1,:] ; zf * similar_ones; y[3:3,:] .+ ϵ],b)
-    # preds_top_tmϵ = eval_trunk_and_combine(model, [y[1:1,:] ; zf * similar_ones; y[3:3,:] .- ϵ],b)
-    # preds_p_ϵ00 = eval_trunk_and_combine(model, y .+ [ϵ,0,0],b)
-    # preds_m_ϵ00 = eval_trunk_and_combine(model, y .- [ϵ,0,0],b)
-    # preds_p_0ϵ0 = eval_trunk_and_combine(model, y .+ [0,ϵ,0],b)
-    # preds_m_0ϵ0 = eval_trunk_and_combine(model, y .- [0,ϵ,0],b)
+    analytical_ini = v_func([y[1:1,:] ; fill(zf, 1, batch_size) ; fill(ti, 1, batch_size)], H_vec,δ_vec,kh_vec)'
 
     y = [y;kh_vec']
+
+    if (n_freq_gen != 1) & (physics_weight_final != 0.0)
+        physics_loss_final = mapreduce(+,1:n_freq_mono) do i
+            return sum(abs2,model([y[1:2,:]; T_vec[:,i]'; y[4:4,:]],u_vals[i+1]) - view(v_vals,i+1:i+1,:))
+        end
+    else
+        physics_loss_final = 0.0
+    end
+
+
     all_y = hcat(
     y,
     [fill(xi, 1, batch_size) ; y[2:4,:]],
     [fill(xf, 1, batch_size) ; y[2:4,:]],
     [y[1:1,:]; fill(zi, 1, batch_size); y[3:4,:]],
     [y[1:1,:] ; fill(zf, 1, batch_size); y[3:4,:]],
-    [y[1:2,:]; fill(ti, 1, batch_size); y[4:4,:]],
+    [y[1:1,:]; fill(zf, 1, batch_size); fill(ti, 1, batch_size); y[4:4,:]],
     [fill(xi+ϵ, 1, batch_size) ; y[2:4,:]],
     [fill(xf-ϵ, 1, batch_size) ; y[2:4,:]],
     [y[1:1,:]; fill(zi+ϵ, 1, batch_size); y[3:4,:]],
@@ -381,10 +421,10 @@ function loss_fun_physics_informed(
     physics_loss_bottom = sum(abs2, z_deriv_bottom)
     physics_loss_top = sum(abs2, z_deriv_top + 1/g * tt_deriv_top)
     physics_loss_interior = sum(abs2, xx_deriv + zz_deriv)
-    data_loss_squared = sum(abs2, preds .- v_vals)
+    data_loss_squared = sum(abs2, preds .- view(v_vals,1:1,:))
     regularisation_loss = sum(norm(Flux.params(model)))
 
-    return (data_loss_squared * data_weight + (physics_loss_top + physics_loss_bottom + physics_loss_sides) * physics_weight_boundary + physics_loss_interior * physics_weight_interior + physics_loss_initial * physics_weight_initial) / (2*batch_size) + regularisation_loss * regularisation_weight
+    return (data_loss_squared * data_weight + (physics_loss_top + physics_loss_bottom + physics_loss_sides) * physics_weight_boundary + physics_loss_interior * physics_weight_interior + physics_loss_initial * physics_weight_initial + physics_loss_final * physics_weight_final) / (2*batch_size) + regularisation_loss * regularisation_weight
 end
 
 function period_prediction(d,s)
@@ -414,15 +454,9 @@ println("Evaluation times per period per batch:")
 
 
 
-loss_fun_plain(((y, u_vals), v_vals), seed, model) = Flux.mse(model([y;H_δ_kh(seed)[3]'],u_vals), v_vals)
+loss_fun_plain(((y, u_vals), v_vals), seed, model) = Flux.mse(model([y;H_δ_kh(seed)[3]'],u_vals[1]), view(v_vals,1:1,:))
 loss_fun_plain(d,s,model)
 flush(stdout)
-
-# Profile.init(n = 10000000, delay = 0.000001)
-# Profile.clear()
-# @profile loss_fun_physics_informed(d,s,model)
-# Juno.profiler()
-# Profile.init(n = 10000000, delay = 0.001)
 
 
 ## Training loop
@@ -440,7 +474,7 @@ loss_validation = fill(NaN,n_epochs)
 verbose = 2
 
 model_filename = "models/trained_model_waves_surface_potential_timestepping_var_depth$(file_postfix).jld2"
-if !load_model
+if !load_model | !isfile(model_filename)
     train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose, loss_fun_plain, model)
     if save_model
         FileIO.save(model_filename,"model",model,"loss_train",loss_train,"loss_validation",loss_validation)
@@ -469,7 +503,7 @@ println(@sprintf "Validation loss (pure data): %.3e" loss_val_no_phys)
 
 all_v_vec::Vector{Float64} = []
 for (d,s) in loaders.test
-    append!(all_v_vec, d[2])
+    append!(all_v_vec, d[2][1:1,:])
 end
 loss_null_guess=Flux.mse(zeros(size(all_v_vec)...), all_v_vec)
 println(@sprintf "Null guess, test loss (pure data): %.3e" loss_null_guess)
@@ -484,7 +518,7 @@ print("Mean of last $(min(10,n_epochs)) validation errors:\n$(mean(loss_validati
 ## Plotting
 
 if do_plots
-    plot_seed = n_u_trajectories + n_u_trajectories_validation + n_u_trajectories_test ÷ 5
+    plot_seed = n_u_trajectories + n_u_trajectories_validation + n_u_trajectories_test ÷ 2
     x_plot = xi:(xf-xi)/50:xf
     z_plot = zi:(zf-zi)/50:zf
     y_t0_plot = hcat([[x,z,ti] for x=x_plot for z=z_plot]...)
@@ -523,18 +557,21 @@ if do_plots
     p=plot(x_plot, z_plot, v_vals_plot-deepo_solution, reuse = false, title=title ,xticks=xticks, st=:surface, right_margin = 4Plots.mm)
     xlabel!("x [m]")
     ylabel!("z [m]")
+    zlabel!("ϕ [m²/s]")
     savefig(p, "plots/small_waves_surface_potential_timestepping_var_depth_example_3d_error$(file_postfix).pdf")
     display(p)
 
     p=plot(x_plot, z_plot, deepo_solution, reuse = false, title="DeepONet prediction at t=T/2", clim=extrema([v_vals_plot;deepo_solution]),xticks=xticks, st=:surface, right_margin = 4Plots.mm)
     xlabel!("x [m]")
     ylabel!("z [m]")
+    zlabel!("ϕ [m²/s]")
     savefig(p, "plots/small_waves_surface_potential_timestepping_var_depth_example_3d_pred$(file_postfix).pdf")
     display(p)
 
     p=plot(x_plot, z_plot, v_vals_plot, reuse = false, title="Analytical solution at t=T/2", clim=extrema([v_vals_plot;deepo_solution]), xticks=xticks, st=:surface, right_margin = 4Plots.mm)
     xlabel!("x [m]")
     ylabel!("z [m]")
+    zlabel!("ϕ [m²/s]")
     savefig(p, "plots/small_waves_surface_potential_timestepping_var_depth_example_3d_analytical$(file_postfix).pdf")
     display(p)
 
@@ -543,6 +580,7 @@ if do_plots
     plot!(x_plot, z_plot, input_fun_plot, reuse = false, title="Input function (t=0T)", clim=extrema([v_vals_plot;deepo_solution]), xticks=xticks, st=:surface, right_margin = 4Plots.mm, alpha=0.75)
     xlabel!("x [m]")
     ylabel!("z [m]")
+    zlabel!("ϕ [m²/s]")
     savefig(p, "plots/small_waves_surface_potential_timestepping_var_depth_example_3d_input_fun$(file_postfix).pdf")
     display(p)
 
@@ -553,7 +591,9 @@ if do_plots
     savefig(p, "plots/small_waves_surface_potential_timestepping_var_depth_training$(file_postfix).pdf")
     display(p)
 
-
+end
+##
+if do_plots
     ## Loss vs time step
     khs = zeros(n_u_trajectories_test*n_y_eval)
     losses = zeros(n_u_trajectories_test*n_y_eval)
@@ -580,6 +620,7 @@ if do_plots
     for (batch_id,(d,s)) in enumerate(loaders.test)
         ((y, u_vals), v_vals) = d
         for p in 0:n_periods-1
+            v_vals = v_func(y .+ [0;0;p],s)'
             for i in 1:batch_size
                 times[(batch_id-1)*batch_size + i + p*n_u_trajectories_test*n_y_eval] = y[3,i] + p
                 losses_time[(batch_id-1)*batch_size + i + p*n_u_trajectories_test*n_y_eval] = loss_fun_plain(((y[:,i:i]+[0;0;p], (u_vals[1][:,i:i],)), v_vals[1:1,i:i]),s[i],model)
@@ -595,6 +636,7 @@ if do_plots
         u_vals_this_time = repeat(u_vals[1],inner=(1,n_sensors))
         kh = H_δ_kh(s)[3]
 
+        v_vals = v_func(y,s)'
         for i in 1:batch_size
             times_iterative[(batch_id-1)*batch_size + i] = y[3,i]
             preds = model([y[:,i:i];kh[i]],(u_vals_this_time[:,i*n_sensors:i*n_sensors],))
@@ -605,7 +647,7 @@ if do_plots
 
             u_vals_this_time = model([repeat(x_locs,1,batch_size);fill(1,1,batch_size*n_sensors);repeat(kh',inner=(1,n_sensors))],(u_vals_this_time,))
             u_vals_this_time = repeat(reshape(u_vals_this_time,n_sensors,batch_size),inner=(1,n_sensors))
-
+            v_vals = v_func(y .+ [0;0;p],s)'
             for i in 1:batch_size
                 times_iterative[(batch_id-1)*batch_size + i + p*n_u_trajectories_test*n_y_eval] = y[3,i] + p
                 preds = model([y[:,i:i];kh[i]],(u_vals_this_time[:,i*n_sensors:i*n_sensors],))

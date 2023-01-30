@@ -318,7 +318,7 @@ loss_validation = fill(NaN,n_epochs)
 verbose = 2
 
 model_filename = "models/trained_model_waves_timestepping$(file_postfix).jld2"
-if !load_model
+if !load_model | !isfile(model_filename)
     train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose, loss_fun_plain, aux_params)
     if save_model
         FileIO.save(model_filename,"model",model,"loss_train",loss_train,"loss_validation",loss_validation)

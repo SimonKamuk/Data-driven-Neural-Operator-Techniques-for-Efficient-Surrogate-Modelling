@@ -229,31 +229,6 @@ function v_func(y, seed)
 end
 
 
-
-# Old function definitions
-# function ϕ(x,z,t,H,δ)
-#
-#     ϕ_vec = map(1:n_freq_gen) do i
-#         Li = L/i
-#         ci = sqrt(g*Li/(2*π) * tanh(2*π*h/Li))
-#         Ti = Li/ci
-#         ki = 2*π/Li
-#         ωi = 2*π/Ti
-#
-#         return @. -H[i]*ci/2 * cosh(ki*(z+h)) / sinh(ki*h) * sin(ωi*t-ki*x+δ[i])
-#     end
-#
-#     return sum(ϕ_vec)
-# end
-# function H_δ_kh(seed)
-#     rng = MersenneTwister(seed)
-#     H = rand(rng, Uniform(H_range[1],H_range[2]), n_freq_gen) .* exp.(-frequency_decay *  (0:n_freq_gen-1).^2)
-#     δ = rand(rng, Uniform(0, 2*π), n_freq_gen)
-#     kh = rand(rng, Uniform(kh_range[1],kh_range[2]),1)
-#
-#     return H,δ,kh
-# end
-
 ## Generate data
 setup_hash = hash((n_sensors,yspan,n_u_trajectories,n_u_trajectories_test,n_u_trajectories_validation,n_y_eval,batch_size,n_freq_gen,frequency_decay,H_range))
 data_filename = "small_waves_potential_timestepping_var_depth_data_hash_$setup_hash.jld2"
@@ -439,7 +414,7 @@ loss_validation = fill(NaN,n_epochs)
 verbose = 2
 
 model_filename = "models/trained_model_waves_timestepping_var_depth$(file_postfix).jld2"
-if !load_model
+if !load_model | !isfile(model_filename)
     train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose, loss_fun_plain, model)
     if save_model
         FileIO.save(model_filename,"model",model,"loss_train",loss_train,"loss_validation",loss_validation)

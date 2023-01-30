@@ -194,7 +194,7 @@ plot_seed = n_u_trajectories + n_u_trajectories_validation + n_u_trajectories_te
 u_vals_plot = u_func(x_locs, plot_seed)
 v_vals_plot = v_func(x_locs, plot_seed)
 deepo_solution = model(reshape(x_locs,1,:), u_vals_plot)[:]
-title = @sprintf "Example DeepONet input/output. MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
+title = "Example DeepONet input/output"
 p=plot(x_locs, u_vals_plot, label="Input function from test set", reuse = false, title=title)
 plot!(x_locs, v_vals_plot, label="Numerical solution")
 plot!(x_locs, deepo_solution, label="DeepONet output")
@@ -206,17 +206,35 @@ display(p)
 
 
 
+title = @sprintf "Example DeepONet error. MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
+p=plot(x_locs, v_vals_plot-deepo_solution, reuse = false, title=title, legend=false)
+xlabel!("y")
+ylabel!("Function value")
+savefig(p, "plots/harmonic_oscillator_test_function_error.pdf")
+display(p)
+
+
+
+
 y_vals_plot = yspan[1]:0.001:yspan[2]
 u_vals_plot = get_u_sinusoidal(plot_seed)(x_locs)
 v_vals_plot = v_func_analytical_sinusoidal(y_vals_plot, plot_seed)
 deepo_solution = model(reshape(y_vals_plot,1,:), u_vals_plot)[:]
-title = @sprintf "Harmonic oscillator. MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
+title = "Example DeepONet input/output"
 p=plot(x_locs, u_vals_plot, label="Input function: F₀sin(ωy)", reuse = false, title=title)
 plot!(y_vals_plot, v_vals_plot, label="Analytical solution")
 plot!(y_vals_plot, deepo_solution, label="DeepONet output")
 xlabel!("y")
 ylabel!("Function value")
 savefig(p, "plots/harmonic_oscillator_analytical.pdf")
+display(p)
+
+
+title = @sprintf "Example DeepONet error. MSE %.2e" Flux.mse(deepo_solution, v_vals_plot)
+p=plot(y_vals_plot, v_vals_plot-deepo_solution, reuse = false, title=title, legend=false)
+xlabel!("y")
+ylabel!("Function value")
+savefig(p, "plots/harmonic_oscillator_analytical_error.pdf")
 display(p)
 
 

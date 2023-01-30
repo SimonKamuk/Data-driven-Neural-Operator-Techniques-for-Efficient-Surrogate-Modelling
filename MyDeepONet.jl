@@ -224,7 +224,7 @@ function generate_data(x_locs, yspan, u_func, v_func, n_sensors, n_u_trajectorie
     end
 
     # if u_func isa Array
-        u_vals = tuple((zeros((n_sensors[i], n_y_eval_total, total_trajectories)) for i in 1:udim)...)
+    u_vals = tuple((zeros((n_sensors[i], n_y_eval_total, total_trajectories)) for i in 1:udim)...)
     # else
     #     u_vals = zeros((n_sensors, n_y_eval_total, total_trajectories))
     # end

@@ -63,57 +63,6 @@ if length(ARGS) == 0
 else
     jobindex = parse(Int64, ARGS[1])
 
-    # (n_sensors,branch_width,trunk_width,latent_size,activation_function,branch_depth,trunk_depth,physics_weight) = [
-    # (n_sensors,width,width,latent_width,activation_function,depth,depth,physics_weight)
-    # for n_sensors in [50,100,150]
-    # for width in [50,75,100]
-    # for latent_width in [50,75,100]
-    # for activation_function in [softplus,tanh,sigmoid]
-    # for depth in [3,4,5]
-    # for physics_weight in [0.1,0.5,1.0]
-    # ][jobindex]
-    #
-    # physics_weight_initial = physics_weight
-    # physics_weight_boundary = physics_weight
-    # physics_weight_interior = physics_weight
-    # data_weight = 1.0
-    # regularisation_weight = 0.0
-
-
-    # (physics_weight_initial,physics_weight_boundary,physics_weight_interior) = [
-    # (initial, internal, boundary)
-    # for initial in [0.0, 0.1, 0.2, 0.3]
-    # for internal in [0.0, 0.1, 0.2, 0.3]
-    # for boundary in [0.0, 0.1, 0.2, 0.3]
-    # ][jobindex]
-    # branch_width = 50
-    # trunk_width = 50
-    # branch_depth = 4
-    # trunk_depth = 4
-    # n_sensors = 50
-    # latent_size = 75
-    # activation_function = softplus
-    # data_weight = 1.0
-    # regularisation_weight = 0.0
-
-
-    # (branch_width,trunk_width,branch_depth,trunk_depth) = [
-    # (bw, tw, bd, td)
-    # for bw in [35, 50, 65]
-    # for tw in [35, 50, 65]
-    # for bd in [3,4,5,6]
-    # for td in [3,4,5,6]
-    # ][jobindex]
-    # physics_weight_initial = 0.0
-    # physics_weight_boundary = 0.0
-    # physics_weight_interior = 0.0
-    # n_sensors = 50
-    # latent_size = 75
-    # activation_function = softplus
-    # data_weight = 1.0
-    # regularisation_weight = 0.0
-
-
     PI_use_AD = false  # AD not currently working
     do_plots = false
 end
@@ -325,7 +274,7 @@ loss_train = fill(NaN,n_epochs)
 loss_validation = fill(NaN,n_epochs)
 verbose = 2
 model_filename = "models/trained_model_waves_velocity$(file_postfix).jld2"
-if !load_model
+if !load_model | !isfile(model_filename)
     train!(model, loaders, params, loss, opt, n_epochs, loss_train, loss_validation, verbose, loss_fun_plain)
     if save_model
         FileIO.save(model_filename,"model",model,"loss_train",loss_train,"loss_validation",loss_validation)

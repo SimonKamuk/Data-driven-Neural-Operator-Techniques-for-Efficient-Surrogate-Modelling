@@ -157,7 +157,7 @@ branch = [Chain(Dense(n_sensors, nn_width, activation_function, init=flux_ini),
 
 trunk = Chain(
     Dense(1, nn_width, activation_function, init=flux_ini),
-    Dense(nn_width, nn_width, activation_function, init=flux_ini),
+    #Dense(nn_width, nn_width, activation_function, init=flux_ini),
     Dense(nn_width, latent_size, activation_function, init=flux_ini)
 )
 
@@ -190,7 +190,7 @@ flush(stdout)
 opt = NAdam()
 # opt = Adam()
 
-n_epochs = 200
+n_epochs = 100
 
 loss_train, loss_validation = train!(model, loaders, params, loss, opt, n_epochs)
 
@@ -212,16 +212,23 @@ println(@sprintf "Test loss: %.3e" loss_test)
 
 ## Plotting
 plot_seed = n_u_trajectories + n_u_trajectories_validation + n_u_trajectories_test÷4
-u_vals_plot = [u_func[i](x_locs_tuple[i], plot_seed) for i in 1:length(u_func)]
+u_vals_plot = u_func(x_locs_tuple, plot_seed)
 v_vals_plot = v_func(x_locs, plot_seed)
 deepo_solution = model(reshape(x_locs,1,:), u_vals_plot)[:]
-title = @sprintf "Example input/output. MSE %.2e. Mass %.3f" Flux.mse(deepo_solution, v_vals_plot) u_vals_plot[2][]
+title = @sprintf "Example input/output. Mass %.3f" u_vals_plot[2][]
 p=plot(x_locs, u_vals_plot[1], label="Input function from test set", reuse = false, title=title)
 plot!(x_locs, v_vals_plot, label="Numerical solution")
 plot!(x_locs, deepo_solution, label="DeepONet output")
 xlabel!("y")
 ylabel!("Function value")
 savefig(p, "plots/harmonic_oscillator_test_function_var_mass.pdf")
+display(p)
+
+title = @sprintf "Example error. MSE %.2e. Mass %.3f" Flux.mse(deepo_solution, v_vals_plot) u_vals_plot[2][]
+p=plot(x_locs, v_vals_plot-deepo_solution, reuse = false, title=title, legend=false)
+xlabel!("y")
+ylabel!("Function value")
+savefig(p, "plots/harmonic_oscillator_test_function_var_mass_error.pdf")
 display(p)
 
 
@@ -232,7 +239,7 @@ m = 0.1
 y_vals_plot = yspan[1]:0.001:yspan[2]
 u_vals_plot = get_u_sinusoidal(plot_seed)(x_locs)
 v_vals_plot = v_func_analytical_sinusoidal(y_vals_plot, plot_seed;m_in=m)
-deepo_solution = model(reshape(y_vals_plot,1,:), [u_vals_plot, [m]])[:]
+deepo_solution = model(reshape(y_vals_plot,1,:), (u_vals_plot, [m]))[:]
 title = @sprintf "Harmonic oscillator. MSE %.2e. Mass %.2f" Flux.mse(deepo_solution, v_vals_plot) m
 p=plot(x_locs, u_vals_plot, label="Input function: F₀sin(ωy)", reuse = false, title=title)
 plot!(y_vals_plot, v_vals_plot, label="Analytical solution")
@@ -247,7 +254,7 @@ m = 0.15
 y_vals_plot = yspan[1]:0.001:yspan[2]
 u_vals_plot = get_u_sinusoidal(plot_seed)(x_locs)
 v_vals_plot = v_func_analytical_sinusoidal(y_vals_plot, plot_seed;m_in=m)
-deepo_solution = model(reshape(y_vals_plot,1,:), [u_vals_plot, [m]])[:]
+deepo_solution = model(reshape(y_vals_plot,1,:), (u_vals_plot, [m]))[:]
 title = @sprintf "Harmonic oscillator. MSE %.2e. Mass %.2f" Flux.mse(deepo_solution, v_vals_plot) m
 p=plot(x_locs, u_vals_plot, label="Input function: F₀sin(ωy)", reuse = false, title=title)
 plot!(y_vals_plot, v_vals_plot, label="Analytical solution")
@@ -261,7 +268,7 @@ m = 0.2
 y_vals_plot = yspan[1]:0.001:yspan[2]
 u_vals_plot = get_u_sinusoidal(plot_seed)(x_locs)
 v_vals_plot = v_func_analytical_sinusoidal(y_vals_plot, plot_seed;m_in=m)
-deepo_solution = model(reshape(y_vals_plot,1,:), [u_vals_plot, [m]])[:]
+deepo_solution = model(reshape(y_vals_plot,1,:), (u_vals_plot, [m]))[:]
 title = @sprintf "Harmonic oscillator. MSE %.2e. Mass %.2f" Flux.mse(deepo_solution, v_vals_plot) m
 p=plot(x_locs, u_vals_plot, label="Input function: F₀sin(ωy)", reuse = false, title=title)
 plot!(y_vals_plot, v_vals_plot, label="Analytical solution")
@@ -275,7 +282,7 @@ m = 0.25
 y_vals_plot = yspan[1]:0.001:yspan[2]
 u_vals_plot = get_u_sinusoidal(plot_seed)(x_locs)
 v_vals_plot = v_func_analytical_sinusoidal(y_vals_plot, plot_seed;m_in=m)
-deepo_solution = model(reshape(y_vals_plot,1,:), [u_vals_plot, [m]])[:]
+deepo_solution = model(reshape(y_vals_plot,1,:), (u_vals_plot, [m]))[:]
 title = @sprintf "Harmonic oscillator. MSE %.2e. Mass %.2f" Flux.mse(deepo_solution, v_vals_plot) m
 p=plot(x_locs, u_vals_plot, label="Input function: F₀sin(ωy)", reuse = false, title=title)
 plot!(y_vals_plot, v_vals_plot, label="Analytical solution")

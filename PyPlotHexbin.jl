@@ -9,7 +9,7 @@ function pyplot_hexbin(plot_params)
 
     if occursin("time",lowercase(title_string))
         # ylim(1e-10,1e4)
-        hexbin(x[idx],y[idx],yscale="log",linewidths=0.05,cmap="inferno",extent=(minimum(x),maximum(x),-8,4)) 
+        hexbin(x[idx],y[idx],yscale="log",linewidths=0.05,cmap="inferno",extent=(minimum(x),maximum(x),-8,4))
     else
         hexbin(x[idx],y[idx],yscale="log",linewidths=0.05,cmap="inferno")
     end
@@ -22,4 +22,4 @@ function pyplot_hexbin(plot_params)
     close()
 end
 
-pyplot_hexbin.(values(FileIO.load("hexbin_plot_data.jld2")))
+pyplot_hexbin.(values(FileIO.load("hexbin_plot_data_polychrome.jld2")))
